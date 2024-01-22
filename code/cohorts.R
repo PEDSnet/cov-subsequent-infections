@@ -44,7 +44,11 @@ get_influenza_evidence <- function(cohort_tbl, ce_start_date, ce_end_date) {
   
   cohort_tbl %>% 
     left_join(influenza_positives %>% 
-                select(person_id, flu_date = earliest_flu_evidence),
+                select(person_id, 
+                       flu_date = earliest_flu_evidence,
+                       flu_dx_date,
+                       earliest_flu_test
+                       ),
               by="person_id") %>% 
     return()
   ## TODO finish return type here 
@@ -66,7 +70,8 @@ get_covid_evidence <- function(cohort_tbl, odr_tbl) {
   cohort_tbl %>% 
     left_join(covid_positives %>% 
                 select(person_id, covid_date = index_date,
-                       covid_index_date_imputed = index_date_imputed),
+                       covid_index_date_imputed = index_date_imputed,
+                       cov_test_date = test_date, covid_dx_date, pasc_dx_date),
               by="person_id") %>% 
     return()
   
@@ -101,7 +106,7 @@ identify_cohort_group <- function(cohort_tbl, odr_tbl, ce_start_date, ce_end_dat
       cohort_assignment == "Covid and influenza same day" ~ covid_date,
       TRUE ~ NA
     )) %>% 
-    select(-covid_date, -flu_date, -visit_start_date) %>% 
+    select(-visit_start_date) %>% 
     mutate(age_years_on_ce_date = as.numeric(ce_date-birth_date)/365.25) %>% 
     return()
   
@@ -273,6 +278,31 @@ flag_outcome_resp_infections <- function(cohort, outcome_start_date, outcome_end
     return()
 }
 
+
+#' Title
+#' Quick summary function to report out the counts as fractions of columns the user specifies
+#'
+#' @param cohort_tbl 
+#' @param group_column_1 
+#' @param group_column_2 
+#'
+#' @return
+#' @export
+#'
+#' @examples
+#' 
+#' sum_fun <- function(.data, group, sum_var) {
+
+summarise_as_fraction <- function(.data, group, distinct_key) {
+  .data %>% 
+    group_by(across({{ group }})) %>% 
+    summarize("sum_{{distinct_key}}" := n_distinct({{ distinct_key }})) %>% 
+    ungroup() %>% 
+    mutate(total_sum = sum(sum_person_id)) %>% 
+    mutate(prop = sum_person_id/total_sum) %>% 
+    return()
+}
+  
 
 
 
