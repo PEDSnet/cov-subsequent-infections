@@ -46,7 +46,7 @@
 #' If you always rely on running the package with the working directory set to
 #' the package directory, you can skip this, at the cost of portability.
 #' @md
-req_basename <- NA
+req_basename <- 'cov-subsequent-infections'
 
 #' Please don't edit: path to the top-level directory of this request package
 #'
@@ -66,36 +66,34 @@ req_basename <- NA
 base_dir <- 'auto-detect'
 
 if (base_dir == 'auto-detect') {
-    base_dir <-
-      {
-       preferred <- Sys.getenv('PEDSNET_DATA_REQUEST_ROOT',
-                                unset = Sys.getenv('HOME', unset = NA))
-        if (! is.na(preferred) && nchar(preferred) > 0 && ! is.na(req_basename))
-          preferred <- file.path(preferred, req_basename)
-        if (file.exists(file.path(preferred, 'site', 'run.R'))) {
-          preferred
-        }
-        else {
-            if (any(file.exists(c('run.R',
-                                  file.path('..', 'site', 'run.R'))))) {
-              file.path(getwd(), '..')
-            } else {
-              if (file.exists(file.path('site', 'run.R'))) {
-                getwd()
-              } else {
-                stop("Can't find package base directory; ",
-                     "set base_dir in site/run.R")
-              }
-            }
-          }
+  base_dir <-
+    {
+      preferred <- Sys.getenv('PEDSNET_DATA_REQUEST_ROOT',
+                              unset = Sys.getenv('HOME', unset = NA))
+      if (! is.na(preferred) && nchar(preferred) > 0 && ! is.na(req_basename))
+        preferred <- file.path(preferred, req_basename)
+      if (file.exists(file.path(preferred, 'site', 'run.R'))) {
+        preferred
       }
-    message('Inferred request base directory of ', base_dir)
+      else {
+        if (any(file.exists(c('run.R',
+                              file.path('..', 'site', 'run.R'))))) {
+          file.path(getwd(), '..')
+        } else {
+          if (file.exists(file.path('site', 'run.R'))) {
+            getwd()
+          } else {
+            stop("Can't find package base directory; ",
+                 "set base_dir in site/run.R")
+          }
+        }
+      }
+    }
+  message('Inferred request base directory of ', base_dir)
 }
 
 source(file.path(base_dir, 'code', 'config.R'))
 config('base_dir', base_dir)
-# Start with empty set of additional packages
-config('extra_packages', c())
 
 #' Please edit: local database configuration information
 #'
@@ -121,7 +119,7 @@ config('retain_intermediates', NA)
 #' during processing of the request.
 #' If it is `NA`, the default value from site_info.R is used.
 #' @md
-config('results_schema', NA)
+config('results_schema', 'subsq_infctns')
 
 #' Request-specific suffix for output
 #'
@@ -131,7 +129,7 @@ config('results_schema', NA)
 #' table name length.
 #' @md
 config('results_name_tag',
-       paste0('_',paste0(sample(letters, 5), collapse = '')))
+       '_pasc_211')
 config('local_name_tag', '_loc')
 
 #' Execution mode

@@ -18,7 +18,7 @@
 #' Your site's name.
 #' For technical reasons, it should be lowercase.
 #' @md
-config('qry_site', 'site_name')
+config('qry_site', 'dcc')
 
 #' Code to establish a database connection at your site.
 #'
@@ -42,7 +42,7 @@ config('qry_site', 'site_name')
 config('db_src', {
   require(srcr);
   default <- Sys.getenv('PEDSNET_DB_SRC_CONFIG_BASE', unset = NA)
-  if (is.na(default) || nchar(default) == 0) default <- 'argos_pedsnet_current'
+  if (is.na(default) || nchar(default) == 0) default <- 'argos_covid_wk167'
   srcr(default)
 })
 
@@ -51,7 +51,7 @@ config('db_src', {
 #' @details
 #' If `NA`, no schema qualifier is added.
 #' @md
-config('cdm_schema', 'pedsnet')
+config('cdm_schema', 'dcc_pedsnet')
 
 #' Name of the schema, if any, to be prepended to vocabulary tables.
 #'
