@@ -1,7 +1,7 @@
 # cov-subsequent-infections
 Study focusing on whether patients with SARS-CoV-2 are more or less at risk for future infections of any kind compared with sets of control patients.
 
-For latest study progress, see [www.google.com](`reporting/study_progress_live.html`) for an update.
+For latest study progress, see [`reporting/study_progress_live.html`](https://htmlpreview.github.io/?https://raw.githubusercontent.com/PEDSnet/cov-subsequent-infections/main/reporting/study_progress_live.html?token=GHSAT0AAAAAACNGFXCHIHVEAHTLM7J3KKQWZNOXUMQ) for an update.
 
 ## `code/` files 
 
