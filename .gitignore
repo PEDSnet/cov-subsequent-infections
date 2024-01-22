@@ -60,7 +60,6 @@ rsconnect/
 *.zip
 *.nb.html
 *.pdf
-*.html
 *.md
 *.gpg
 .#*
