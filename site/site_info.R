@@ -20,6 +20,7 @@
 #' @md
 config('qry_site', 'dcc')
 
+
 #' Code to establish a database connection at your site.
 #'
 #' The connection must be able to reach CDM data, the vocabularies,
@@ -39,19 +40,35 @@ config('qry_site', 'dcc')
 #'     * `Sys.setenv(ORA_SDTZ=Sys.timezone())`
 #'
 #' @md
-config('db_src', {
-  require(srcr);
-  default <- Sys.getenv('PEDSNET_DB_SRC_CONFIG_BASE', unset = NA)
-  if (is.na(default) || nchar(default) == 0) default <- 'argos_covid_wk167'
-  srcr(default)
-})
+
+if (Sys.getenv("AWS")==TRUE) {
+  config('db_src', {
+    require(srcr);
+    default <- Sys.getenv('PEDSNET_DB_SRC_CONFIG_BASE', unset = NA)
+    if (is.na(default) || nchar(default) == 0) default <- 'argos_rcvr_s10'
+    srcr(default)
+  })
+} else {
+  config('db_src', {
+    require(srcr);
+    default <- Sys.getenv('PEDSNET_DB_SRC_CONFIG_BASE', unset = NA)
+    if (is.na(default) || nchar(default) == 0) default <- 'argos_covid_wk167'
+    srcr(default)
+  })
+}
+
 
 #' Name of the schema, if any, to be prepended to CDM fact table names.
 #'
 #' @details
 #' If `NA`, no schema qualifier is added.
 #' @md
-config('cdm_schema', 'dcc_pedsnet')
+
+if (Sys.getenv("AWS")) {
+  config('cdm_schema', 'peds_omop')
+} else {
+  config('cdm_schema', 'dcc_pedsnet')
+}
 
 #' Name of the schema, if any, to be prepended to vocabulary tables.
 #'

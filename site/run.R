@@ -48,6 +48,9 @@
 #' @md
 req_basename <- 'cov-subsequent-infections'
 
+## If running on full RECOVER data on AWS, set to true
+Sys.setenv("AWS"=TRUE)
+
 #' Please don't edit: path to the top-level directory of this request package
 #'
 #' This path should point to the top-level directory of the unzipped
@@ -120,6 +123,9 @@ config('retain_intermediates', NA)
 #' If it is `NA`, the default value from site_info.R is used.
 #' @md
 config('results_schema', 'subsq_infctns')
+if (Sys.getenv("AWS")) {
+  config('results_schema', 'subsequent_infections')
+}
 
 #' Request-specific suffix for output
 #'
