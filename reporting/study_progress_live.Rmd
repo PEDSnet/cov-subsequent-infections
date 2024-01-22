@@ -1,0 +1,55 @@
+---
+title: "Study Progress: Subsequent Infections following SARS-CoV-2 in Children"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+---
+
+
+This is a living document that is designed to be saved at any amount of points throughout the study, and can be referenced as a state report document with envisioned timelines, findings so far, decisions that have or have not been made, interesting plots, cohort information, and anlaysis information.
+
+# Study progress as of Jan 22nd, 2024
+
+
+```{r include=FALSE}
+# Default taken from R notebook behavior: when knitting, wd will always be location of notebook
+base_dir <- '..'
+Sys.setenv(PEDSNET_SKIP_REQUEST_EXECUTION=1)
+try(source('../site/run.R')) # May not be able to make db connection
+
+# Set to "local" to read data from ../results, or another value to read from db
+data_source <- if_else(config('execution_mode') == 'distribution', 'local', 'not_local')
+
+require(tibble)
+require(knitr)
+require(kableExtra)
+require(readr)
+require(tidyverse)
+require(table1)
+
+get_results <- function(tbl_name) {
+  if (data_source == 'local') {
+    rslt <- read_csv(paste0('../results/', tbl_name, '.csv'))
+  }
+  else {
+    rslt <- results_tbl(tbl_name) %>% collect()
+  }
+  rslt
+}
+
+prettify_kable <- function(data) {
+  rslt <- data %>% kable(digits = 4, format.args = list(big.mark = ','))
+  if (knitr::is_html_output()) rslt <- rslt %>%
+    kable_styling(bootstrap_options = c("striped", "hover")) %>%
+    column_spec(1, bold = T, border_right = T)
+  rslt
+}
+
+```
+
+## Latest updates
+
+Example updates for study.

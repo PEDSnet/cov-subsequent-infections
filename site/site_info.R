@@ -52,7 +52,7 @@ if (Sys.getenv("AWS")==TRUE) {
   config('db_src', {
     require(srcr);
     default <- Sys.getenv('PEDSNET_DB_SRC_CONFIG_BASE', unset = NA)
-    if (is.na(default) || nchar(default) == 0) default <- 'argos_covid_wk167'
+    if (is.na(default) || nchar(default) == 0) default <- 'argos_covid_wk180'
     srcr(default)
   })
 }

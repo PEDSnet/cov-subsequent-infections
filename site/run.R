@@ -49,7 +49,7 @@
 req_basename <- 'cov-subsequent-infections'
 
 ## If running on full RECOVER data on AWS, set to true
-Sys.setenv("AWS"=TRUE)
+Sys.setenv("AWS"=FALSE)
 
 #' Please don't edit: path to the top-level directory of this request package
 #'
