@@ -30,7 +30,7 @@ odr <- cdm_tbl("observation_derivation_recover") %>%
 ## Getting data pertaining to the washouts
 #MISC or PASC: if observation_concept_id==2000001527, value_as_concept_id==703578, or 2000001520  and patient does NOT have covid, then washout
 # Serology test, observation_concept_id==2000001528, value_as_concept_id %in% c(2000001526, 9191)
-apply_washout_logic <- function(cohort) {
+apply_washout_logic <- function(cohort, odr) {
   cohort %>% 
     left_join(odr %>% 
                 filter(observation_concept_id %in% c(2000001527, 2000001528),
@@ -62,17 +62,30 @@ apply_washout_logic <- function(cohort) {
 
 
 ## Code continues from `driver_cohort_attrition`
-results_tbl(paste0("ce", cohort_1_label, "unfiltered")) %>% 
-  summarise_as_fraction(group = c(cohort_assignment), distinct_key = person_id)
 
 cohort_with_washouts <-
   results_tbl(paste0("ce", cohort_1_label, "unfiltered")) %>% 
   mutate(sub_cohort = cohort_assignment) %>% 
-  apply_washout_logic() %>% 
+  apply_washout_logic(odr = odr) %>% 
   compute_new()
 
-eligible_pats_saved <- results_tbl(paste0("ce", cohort_1_label, "unfiltered"))
-ce_start_date = as.Date("2021-04-01")
-ce_end_date = as.Date("2023-10-01")
-cohort_1_label = "_04211023_"
+cohort_with_washouts %>% 
+  group_by(study_eligible, washout) %>% 
+  summarise(n())
+
+cohort_with_washouts %>% 
+  filter(cohort_assignment %in% c("Covid", "Influenza")) %>% 
+  summarise_as_fraction(group = c(washout, study_eligible), distinct_key = person_id)
+
+cohort_with_washouts %>% 
+  filter(study_eligible == 1) %>% 
+  filter(washout == 0) %>% 
+  filter(cohort_assignment != "No infection") %>% 
+  select(person_id, ce_date, sub_cohort = cohort_assignment) %>% 
+  output_tbl("base_cohort", indexes=c("person_id"))
+
+
+
+
+
 
