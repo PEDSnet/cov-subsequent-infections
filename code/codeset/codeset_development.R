@@ -107,6 +107,20 @@ lab_rsv_strings %>%
   select(concept_id, concept_name, concept_code, vocabulary_id) %>% 
   write.csv('specs/lab_rsv.csv', row.names = FALSE)
 
+
+### Dx RSV, subset of dx_respiratory infections
+
+respiratory_codeset <- load_codeset("dx_noncov_resp_infections")
+
+rsv_dx <- respiratory_codeset %>% 
+  filter(str_detect(tolower(concept_name), 'rsv') |
+           str_detect(tolower(concept_name), 'respiratory syncytial virus'))
+
+## TODO: needs to be filtered for whether or not the "due to" category is applicable
+rsv_dx %>% 
+  select(concept_id, concept_name, concept_code, vocabulary_id) %>% 
+  write.csv('specs/dx_rsv_draft.csv', row.names = FALSE)
+
 ## Lab MSK
 lab_rsv_strings <- vocabulary_tbl('concept') %>% 
   filter(str_detect(tolower(concept_name), 'rsv') |

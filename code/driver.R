@@ -29,6 +29,8 @@ config_append('extra_packages', c())
   # By convention, accumulate execution results in a list rather than as
   # independent variables, in order to make returning the entire set easier
   rslt <- list()
+  
+  ###### Create analytic dataset here?
 
   message('Insert message here')
   rslt$starter <- first_function(config('db_src')) %>%
