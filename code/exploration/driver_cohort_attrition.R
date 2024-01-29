@@ -3,6 +3,8 @@
 ### cohort entry date maximum
 ### cohort can later be edited down based on cohort entry date so better cast a wider net first
 
+## TODO should save some attrition statistics in here when ready, and populate into the `study_progress_live.Rmd` doc
+
 ce_start_date = as.Date("2021-04-01")
 ce_end_date = as.Date("2023-10-01")
 # cohort_1_label = "_06210223_"
