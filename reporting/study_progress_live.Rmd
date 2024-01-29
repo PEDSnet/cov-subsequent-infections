@@ -71,24 +71,43 @@ COVID cohort:
 COVID-specific diagnosis code or
 MIS-C/PASC code, with index date imputed if not available to 60 days before
 
-3)	At least 1 prior visit in the preceding 18 months to define active population that interacts with health system, or appropriate utilization criteria for infants
+3)	At least 1 prior visit in the preceding 18 months to define active population that interacts with health system, or appropriate utilization criteria for infants, and at least one visit during the follow up period 1-6 months after cohort entry date / index date
 
-4)	At least one visit during the follow up period 1-6 months after cohort entry date / index date
-
-Influenza Control cohort:
+Influenza comparison cohort:
 
 1)	Children < 5 years of age at time of first test date within the study period
 
-2)	Evidence of influenza or influenza-like-illness (lab confirmed or codeset)
+2)	Evidence of influenza (lab confirmed or diagnosis code)
 
-3)	No evidence of SARS-CoV-2 by antigen or PCR or
-COVID-specific diagnosis code or
-MIS-C/PASC code
+3)	At least 1 prior visit in the preceding 18 months to define active population that interacts with health system, or appropriate utilization criteria for infants, and at least one visit during the follow up period 1-6 months after cohort entry date / index date
 
-4)	At least 1 prior visit in the preceding 18 months to define active population that interacts with health system, or appropriate utilization criteria for infants
+Exclusion Criteria:
 
-5)	At least one visit during the follow up period 1-6 months after cohort entry date / index date
+1) No serology positive if Influenza patient, or if covid patient, cannot be serology positive before the index covid event
 
+2) No MISC or PASC code if Influenza patient (without covid)
+
+### Cohort entry dates, by group, so far
+
+Cohort with all entry criteria and washout criteria applied. Distributions of cohort entry dates over time, separated by sub cohort group:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=5, fig.height=5}
+
+results_tbl("base_cohort") %>% 
+  ggplot() + 
+  geom_density(aes(x=ce_date, fill=sub_cohort), alpha=0.5, position="stack") + 
+  facet_wrap(~sub_cohort, ncol = 1) + 
+  theme(legend.position = "none") +
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=10, type = "continuous"))  +
+  theme_bw() +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_x_date(breaks = "month") +
+  labs(x="", y="")
+
+
+```
+
+### Timescales for clinical focus
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=6}
 
@@ -96,9 +115,11 @@ cohort_1_label = "_04211023_"
 
 cohort_prematch <- results_tbl(paste0("ce", cohort_1_label, "unfiltered"))
 
+cohort_prematch <- results_tbl("base_cohort") %>% mutate(cohort_assignment = sub_cohort)
+
 ## Distribution
 g <- cohort_prematch %>% 
-  filter(study_eligible ==1) %>% 
+  # filter(study_eligible ==1) %>% 
   filter(!(cohort_assignment %in% c("Covid and influenza same day", "Influenza prior to covid", "Covid prior to influenza", "No infection"))) %>% 
   # mutate(follow_up_30 = ce_date + days(30)) %>% 
   # mutate(follow_up_180 = ce_date + days(180)) %>% 
@@ -221,6 +242,8 @@ base_shift_plot +
 * Injury `dx_injury`
 
 * Poisoning `dx_poisoning`
+
+
 
 
 

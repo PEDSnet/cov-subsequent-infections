@@ -16,7 +16,7 @@ columns <- c("person_id",
              )
 
 ## Minimum number of columns needed to create the base cohort, and its tidy
-
+## TODO: need to maintain visit_occurrence_id for the index visit for each person, otherwise won't know which to use for visit_payer crosswalk? could reverse engineer
 
 ### Washouts
 ce_start_date = as.Date("2021-04-01")
