@@ -121,10 +121,10 @@ vocabulary_tbl <-
 #' @md
 results_tbl <- function(name, db = config('db_src'),
                         results_tag =  TRUE, local_tag = FALSE) {
-    .qual_tbl(intermed_name(name, temporary = FALSE,
-                            results_tag = results_tag,
-                            local_tag = local_tag),
-              'results_schema', db)
+  .qual_tbl(intermed_name(name, temporary = FALSE,
+                          results_tag = results_tag,
+                          local_tag = local_tag),
+            'results_schema', db)
 }
 
 #' Construct a (possibly schema-qualified) intermediate result table name
@@ -172,7 +172,7 @@ results_tbl <- function(name, db = config('db_src'),
 #' @return The resultant name
 #' @md
 intermed_name <- function(name = paste0(sample(letters, 12, replace = TRUE),
-                                           collapse = ""),
+                                        collapse = ""),
                           temporary = ! config('retain_intermediates'),
                           results_tag =  TRUE,
                           local_tag = NA,
@@ -265,29 +265,29 @@ db_remove_table <- function(db = config('db_src'), name,
                             temporary = FALSE, fail_if_missing = FALSE) {
   con <- dbi_con(db)
   elts <- .parse_tblspec(name)
-
+  
   sql <- paste0('drop table ',
                 base::ifelse(fail_if_missing, '', 'if exists '))
   if (any(grepl('ora', class(con), ignore.case = TRUE))) {
     if (! db_exists_table(con, name)) return(TRUE)
     if (length(elts) > 1) {
-    elts <- rev(elts)
-   DBI::dbRemoveTable(con, elts[1], schema = elts[2])
+      elts <- rev(elts)
+      DBI::dbRemoveTable(con, elts[1], schema = elts[2])
     } else {
       DBI::dbRemoveTable(con, elts[1])
     }
   }
   else if (!temporary &&
-             any(class(con) %in% c('PostgreSQLConnection', 'PqConnection')) &&
-             length(elts) > 1) {
+           any(class(con) %in% c('PostgreSQLConnection', 'PqConnection')) &&
+           length(elts) > 1) {
     name <- DBI::SQL(paste0(DBI::dbQuoteIdentifier(con, elts[1]),
-                               '.',
-                               DBI::dbQuoteIdentifier(con, elts[2])))
+                            '.',
+                            DBI::dbQuoteIdentifier(con, elts[2])))
     DBI::dbExecute(con, paste0(sql, name))
   }
   else {
     name <- paste0(vapply(elts, function (x) DBI::dbQuoteIdentifier(con, x),
-                             FUN.VALUE = character(1)), collapse = '.')
+                          FUN.VALUE = character(1)), collapse = '.')
     DBI::dbExecute(con, paste0(sql, name))
   }
   invisible(TRUE)
@@ -314,7 +314,7 @@ db_remove_table <- function(db = config('db_src'), name,
 db_exists_table <- function(db = config('db_src'), name) {
   con <- dbi_con(db)
   elts <- .parse_tblspec(name)
-
+  
   if (any(grepl('ora', class(con), ignore.case = TRUE)) &&
       length(elts) > 1) {
     elts <- rev(elts)
@@ -381,28 +381,28 @@ compute_new <- function(tblx,
                                       collapse = ""),
                         temporary = ! config('retain_intermediates'),
                         ...) {
-    if (!inherits(name, c('ident_q', 'dbplyr_schema')) && length(name) == 1) {
-      name <- gsub('\\s+','_', name, perl = TRUE)
-      name <- intermed_name(name, temporary)
-    }
-    con <- dbi_con(tblx)
-    if (db_exists_table(con, name)) db_remove_table(con, name)
-    if (config('db_trace')) {
-      show_query(tblx)
-      explain(tblx)
-      message(' -> ',
-              base::ifelse(packageVersion('dbplyr') < '2.0.0',
-                           dbplyr::as.sql(name),
-                           dbplyr::as.sql(name, con)))
-      start <- Sys.time()
-      message(start)
-    }
-    rslt <- dplyr::compute(tblx, name = name, temporary = temporary, ...)
-    if (config('db_trace')) {
-      end  <- Sys.time()
-      message(end, ' ==> ', format(end - start))
-    }
-    rslt
+  if (!inherits(name, c('ident_q', 'dbplyr_schema')) && length(name) == 1) {
+    name <- gsub('\\s+','_', name, perl = TRUE)
+    name <- intermed_name(name, temporary)
+  }
+  con <- dbi_con(tblx)
+  if (db_exists_table(con, name)) db_remove_table(con, name)
+  if (config('db_trace')) {
+    show_query(tblx)
+    if (config('can_explain')) explain(tblx)
+    message(' -> ',
+            base::ifelse(packageVersion('dbplyr') < '2.0.0',
+                         dbplyr::as.sql(name),
+                         dbplyr::as.sql(name, con)))
+    start <- Sys.time()
+    message(start)
+  }
+  rslt <- dplyr::compute(tblx, name = name, temporary = temporary, ...)
+  if (config('db_trace')) {
+    end  <- Sys.time()
+    message(end, ' ==> ', format(end - start))
+  }
+  rslt
 }
 
 
@@ -422,7 +422,7 @@ collect_new <- function(tblx, ...) {
   if (config('db_trace')) {
     if (inherits(tblx, 'tbl_sql')) {
       show_query(tblx)
-      explain(tblx)
+      if (config('can_explain')) explain(tblx)
     }
     message(' -> collect')
     start <- Sys.time()
@@ -559,11 +559,11 @@ output_tbl <- function(data, name = NA, local = FALSE,
                        db = if (! file) config('results_target') else NA,
                        results_tag = TRUE, ...) {
   if (is.na(name)) name <- quo_name(enquo(data))
-
+  
   if (file) {
     rslt <- .output_csv(data, name, local)
   }
-
+  
   # Conditional logic is a little convoluted here to allow for legacy behavior
   # of allowing Boolean value for db
   if ( is.object(db) || (!is.na(db) && db)) {
@@ -572,13 +572,13 @@ output_tbl <- function(data, name = NA, local = FALSE,
                            results_tag = results_tag, local_tag = local)
     if (any(class(data)  == 'tbl_sql') &&
         identical(dbi_con(data), dbi_con(db))) {
-      rslt <- compute_new(data, rname, temporary = FALSE, db = db, ...)
+      rslt <- compute_new(data, rname, temporary = FALSE, ...)
     }
     else {
       rslt <- copy_to_new(db, collect_new(data), rname,
                           temporary = FALSE, overwrite = TRUE, ...)
     }
   }
-
+  
   invisible(rslt)
 }

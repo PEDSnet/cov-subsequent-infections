@@ -55,7 +55,11 @@ prettify_kable <- function(data) {
 
 ## Latest updates
 
-Example updates for study.
+2/2/2024: Thinking that we need to do some extra DQ before developing some of the main outcome variables. For example, defining the outcome of "Has an incident non-covid respiratory diagnosis during the post-acute period following index case of SARS-CoV-2" requires that we properly screen a patient for proper follow-up after the index infection, making sure that the outcome (subsequent infection) is not confounded by, for example, a bunch of repeat visits for the same index infection resulting in the mis-coding of the subsequent infection.
+
+Noticed that in some early DQ, when we look at the `days until outcome`, the distribution is pressed very far left at 30 days, implying that there is significant density at days < 30, meaning that these diagnoses may not be occurring incidently during the post-acute period.
+
+Need to apply some diagnosis clustering logic to roll-up conditions into the acute period, distinct visits for new incident diagnoses, before identifying the outcomes (can't just use the codeset point blank, though it's a start).
 
 ## Cohort
 

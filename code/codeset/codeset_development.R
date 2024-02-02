@@ -91,6 +91,16 @@ infectious_disease_snomed_filtered %>%
             by=c("concept_id", "concept_name", "concept_code", "vocabulary_id")) %>% 
   write.csv('specs/dx_any_infection.csv', row.names = FALSE)
 
+### Excluding covid from any infection codeset:
+any_infection_codeset_without_covid <- load_codeset("dx_any_infection") %>% 
+  filter(!(
+    str_detect(tolower(concept_name), 'covid') |
+      str_detect(tolower(concept_name), 'sars-cov') |
+      str_detect(tolower(concept_name), 'coronavirus')))
+
+any_infection_codeset_without_covid %>% 
+  write.csv('specs/dx_noncov_any_infection.csv', row.names = FALSE)
+
 
 
 ### Lab_rsv
