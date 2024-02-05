@@ -21,6 +21,8 @@ weights.out <- weightit(as.formula("exposure~ce_days_secular"), data=cohort_outc
                         method="glm", estimand="ATE") #focal = "circle pill")
 cohort_outcomes$w = weights.out$weights
 
+summary(weights.out)
+
 cohort_outcomes %>% 
   group_by(sub_cohort, has_postacute_general_outcome) %>% 
   summarise(n=n_distinct(person_id), weighted_n = sum(w)) %>% 

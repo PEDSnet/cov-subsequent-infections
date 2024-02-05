@@ -217,6 +217,113 @@ summarise_as_fraction <- function(.data, group, distinct_key) {
     mutate(prop = sum_person_id/total_sum) %>% 
     return()
 }
+
+
+### Performing the washouts
+## Getting data pertaining to the washouts
+#MISC or PASC: if observation_concept_id==2000001527, value_as_concept_id==703578, or 2000001520  and patient does NOT have covid, then washout
+# Serology test, observation_concept_id==2000001528, value_as_concept_id %in% c(2000001526, 9191)
+#' Title
+#'
+#' @param cohort 
+#' @param odr 
+#'
+#' @return
+#' @export
+#'
+#' @examples
+apply_washout_logic <- function(cohort, odr) {
+  
+  cohort %>% 
+    left_join(odr %>% 
+                filter(observation_concept_id %in% c(2000001527, 2000001528),
+                       value_as_concept_id %in% c(703578, 2000001520, 2000001526, 9191)) %>% 
+                select(person_id, observation_date, observation_concept_id, value_as_concept_id),
+              by="person_id") %>% 
+    mutate(washout_reason = case_when(
+      observation_concept_id==2000001527 & 
+        value_as_concept_id %in% c(703578, 2000001520) & 
+        sub_cohort %in% c("Influenza", "No infection") ~ "non_covid pt with_misc or pasc",
+      observation_concept_id==2000001528 & 
+        value_as_concept_id %in% c(2000001526, 9191) & 
+        sub_cohort == "Covid" &
+        observation_date < ce_date ~ "covid pat with serology pos prior to ce date",
+      observation_concept_id==2000001528 & 
+        value_as_concept_id %in% c(2000001526, 9191) & 
+        sub_cohort %in% c("Influenza", "No infection") ~ "non_covid pat with serology pos",
+      TRUE ~ "none"
+    )) %>% 
+    mutate(washout = case_when(
+      washout_reason == "none" ~ 0,
+      TRUE ~ 1
+    )) %>% 
+    group_by(person_id) %>% 
+    slice_max(washout, with_ties = FALSE) %>% 
+    ungroup() %>% 
+    return()
+}
+
+generate_output_unfiltered_cohort <- function(ce_start_date, ce_end_date, cohort_label, odr) {
+  eligible_pats <-
+    cdm_tbl("person") %>% 
+    get_patients_under_age_limit(cdm_tbl("visit_occurrence"), ce_start_date, ce_end_date, age_limit_years_rough = 6) %>% 
+    identify_cohort_group(odr_tbl = odr, ce_start_date = ce_start_date, ce_end_date = ce_end_date) %>% 
+    compute_new(indexes=c("person_id")) %>% 
+    mutate(age_at_ce_under_limit = ifelse(age_years_on_ce_date < 5, 1, 0)) %>% 
+    mutate(index_date = ce_date) %>% 
+    flag_visits_prior(cdm_tbl("visit_occurrence"), n_years = 1.5) %>% 
+    flag_visit_follow_up(cdm_tbl("visit_occurrence")) %>% 
+    select(-index_date) %>% 
+    compute_new(indexes=c("person_id")) %>% 
+    flag_study_eligiblity(ce_start_date, ce_end_date) %>% 
+    compute_new(indexes=c("person_id"))
+  
+  eligible_pats %>% 
+    output_tbl(paste0("cohort", cohort_label, "unfiltered"), indexes=c("person_id"))
+  
+  eligible_pats %>% 
+    return()
+}
+
+generate_output_cohort_demo <- function(ce_start_date, ce_end_date, cohort_tbl_name, cohort_output_tbl_name) {
+  eligible_pats_demo <-
+    results_tbl(cohort_tbl_name) %>% 
+    left_join(cdm_tbl("person") %>% 
+                select(person_id, gender_concept_id,
+                       race_concept_id, ethnicity_concept_id), by="person_id") %>% 
+    mutate(mock_medical_complexity = case_when(person_id %% 17 == 1 ~ "complex chronic",
+                                               person_id %% 8==1 ~ "chronic, non-complex",
+                                               TRUE ~ "non complex or chronic")) %>% 
+    mutate(sex_cat = case_when(gender_concept_id == 8507L ~ 'Male',
+                               gender_concept_id == 8532L ~ 'Female',
+                               TRUE ~ 'Other/unknown'),
+           race_eth_cat = case_when(ethnicity_concept_id == 38003563L ~ 'Hispanic',
+                                    race_concept_id == 8516L ~ 'NH_Black/AA',
+                                    race_concept_id %in% c(8515L, 8557L) ~
+                                      'NH_Asian/PI',
+                                    #                               race_concept_id == 8657L ~ 'Native American',
+                                    race_concept_id == 8527L ~ 'NH_White',
+                                    race_concept_id == 44814659L ~ 'NH_Multiple',
+                                    TRUE ~ 'Other/Unknown'),
+           age_cat_at_ce = case_when(age_years_on_ce_date < 0.5 ~ "<6 months",
+                                     age_years_on_ce_date < 1 ~ "6m-1y old",
+                                     age_years_on_ce_date < 2 ~ "1-2y old",
+                                     age_years_on_ce_date < 3 ~ "2-3y old",
+                                     age_years_on_ce_date < 4 ~ "3-4y old",
+                                     TRUE ~ "4-5y old")) %>% 
+    mutate(cohort_entry_week = floor_date(ce_date, unit="week")) %>% 
+    select(-gender_concept_id, -race_concept_id, -ethnicity_concept_id) %>% 
+    flag_utilization_level(cdm_tbl("visit_occurrence"), lookback_days = 365) %>% 
+    # left_join(results_tbl(paste0("cohort", cohort_1_label, "pmca")), by="person_id") %>% 
+    compute_new(indexes=c("person_id"))
+  
+  eligible_pats_demo %>% 
+    output_tbl(cohort_output_tbl_name, indexes=c("person_id"))
+  
+  eligible_pats_demo %>% 
+    return()
+}
+
   
 
 
