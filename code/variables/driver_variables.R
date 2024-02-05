@@ -38,21 +38,6 @@ base_cohort <- results_tbl("base_cohort") %>%
   ungroup() %>% 
   compute_new()
 
-base_cohort_resp_outcomes_test <-
-  base_cohort %>% 
-  flag_outcome_resp_infections(outcome_start_date = as.Date("2021-07-01"),
-                               outcome_end_date = as.Date("2023-08-01"))
-
-base_cohort_any_outcomes_test <-
-  base_cohort %>% 
-  flag_outcome_infections(outcome_start_date = as.Date("2021-07-01"),
-                               outcome_end_date = as.Date("2023-08-01"))
-
-base_cohort_rsv_outcomes_test <-
-  base_cohort %>% 
-  flag_rsv_outcome_draft(outcome_start_date = as.Date("2022-04-01"),
-                               outcome_end_date = as.Date("2023-07-01"))
-
 ### Then need to edit for records for patients within the proper cohort entry period
 
 ## First, EDA. How many infections does each person have?
@@ -163,6 +148,12 @@ cohort_with_all_outcomes %>%
   filter(sub_cohort %in% c("Covid", "Influenza")) %>% 
   pivot_longer(cols = c(days_til_earliest_general_outcome, days_til_earliest_resp_outcome, days_til_earliest_rsv_outcome),
                names_to = "outcome", values_to = "days_until_outcome") %>% 
+  mutate(has_postacute_outcome = case_when(outcome == "days_til_earliest_general_outcome" & has_postacute_general_outcome==1 ~ 1,
+                                           outcome == "days_til_earliest_resp_outcome" & has_postacute_resp_outcome==1 ~ 1,
+                                           outcome == "days_til_earliest_rsv_outcome" & has_postacute_rsv_outcome==1 ~ 1,
+                                           TRUE ~ 0
+                                           )) %>% 
+  filter(has_postacute_outcome == 1) %>% 
   ggplot() +
   geom_density(aes(x=days_until_outcome, fill=sub_cohort)) +
   facet_wrap(~outcome, scales = "free") +

@@ -324,6 +324,147 @@ generate_output_cohort_demo <- function(ce_start_date, ce_end_date, cohort_tbl_n
     return()
 }
 
+generate_output_outcome_lists <- function(cohort, outcome, outcome_start_date, outcome_end_date, output_tbl_name) {
+  if (outcome == "rsv") {
+    outcomes <- cohort %>% 
+      flag_rsv_outcome_draft(outcome_start_date, outcome_end_date) %>% 
+      compute_new(indexes=c("person_id"))
+  } else if (outcome == "general") {
+    outcomes <- cohort %>% 
+      flag_outcome_infections(outcome_start_date,
+                              outcome_end_date) %>% 
+      compute_new(indexes=c("person_id"))
+  } else if (outcome == "respiratory") {
+    outcomes <- cohort %>% 
+      flag_outcome_resp_infections(outcome_start_date,
+                                   outcome_end_date) %>% 
+      compute_new(indexes=c("person_id"))
+  } else {
+    print(paste0("Hm, did not have a method available for ", outcome," , available outcomes are rsv, general, and respiratory."))
+  }
+  
+  outcomes %>% 
+    output_tbl(output_tbl_name)
+}
+
+### Function to compute trajectories for patient outcomes
+compute_patient_trajectories(cohort) {
+  
+}
+
+
+plot_rollup_summary <- function(rolled_up_dx_tbl, n_sample_size = 50, person_labels = FALSE, show_intermed_events = TRUE) {
+  if (show_intermed_events) {
+    data <- rolled_up_dx_tbl
+  } else {
+    data <- rolled_up_dx_tbl %>% 
+      filter(record_flag != "intermediate_follow_up_dx")
+  }
+  
+  rollup_plot <-
+    data %>% 
+    group_by(person_id) %>% 
+    mutate(max_day = max(days_from_ce)) %>% 
+    mutate(viz_id=cur_group_id()) %>% 
+    filter(viz_id < n_sample_size) %>% 
+    ungroup() %>% 
+    mutate(viz_id = fct_reorder(factor(viz_id), max_day)) %>% 
+    group_by(person_id, event) %>% 
+    mutate(person_event = paste0(person_id, "_", event)) %>% 
+    ggplot() +
+    geom_line(aes(x=days_from_ce, y = viz_id, group=person_event),
+              size = 2, alpha = 0.9) +
+    geom_line(aes(x=days_from_ce, y = viz_id, group=viz_id),
+              size = 0.25, alpha = 0.2) +
+    geom_point(aes(x=days_from_ce, y = viz_id, shape = record_flag, col=record_flag),
+               stroke = 1.5,  alpha = .9) +
+    theme_bw() +
+    scale_color_manual(values = wes_palette("FantasticFox1", n=8, type = "continuous")) +
+    labs(x="Days from cohort entry date", y= "Patient ID")
+  
+  if (person_labels) {
+    rollup_plot <- rollup_plot + 
+      geom_label(aes(x=-10, y = viz_id, group=viz_id, label=person_id))
+  }
+  
+  rollup_plot %>% 
+    return()
+}
+
+
+generate_outcome_dataset <- function(cohort,
+                                     outcome_type,
+                                     respiratory_tbl,
+                                     general_tbl,
+                                     rsv_tbl,
+                                     output_tbl_name) {
+  if (outcome_type=="presence") {
+    ## Then roll up the data into earliest event of that type
+    earliest_resp_infection <-
+      respiratory_tbl %>% 
+      left_join(cohort, by="person_id") %>% 
+      mutate(days_til_resp_outcome = as.numeric(condition_start_date - ce_date)) %>% 
+      filter(days_til_resp_outcome > 7) %>% 
+      group_by(person_id) %>% 
+      slice_min(condition_start_date, with_ties = FALSE) %>% 
+      select(person_id, earliest_resp_outcome = condition_start_date, resp_concept = concept_name) %>% 
+      ungroup() %>% 
+      compute_new()
+    
+    cohort_with_resp_outcomes <-
+      cohort %>% 
+      left_join(earliest_resp_infection, by="person_id") %>% 
+      mutate(days_til_earliest_resp_outcome = as.numeric(earliest_resp_outcome - ce_date)) %>% 
+      compute_new()
+
+    earliest_general_infection <-
+      general_tbl %>% 
+      left_join(cohort, by="person_id") %>% 
+      mutate(days_til_any_outcome = as.numeric(condition_start_date - ce_date)) %>% 
+      filter(days_til_any_outcome > 7) %>% 
+      group_by(person_id) %>% 
+      slice_min(condition_start_date, with_ties = FALSE) %>% 
+      select(person_id, earliest_general_outcome = condition_start_date, general_concept = concept_name) %>% 
+      ungroup() %>% 
+      compute_new()
+    
+    cohort_with_general_outcomes <-
+      cohort_with_resp_outcomes %>% 
+      left_join(earliest_general_infection, by="person_id") %>% 
+      mutate(days_til_earliest_general_outcome = as.numeric(earliest_general_outcome - ce_date)) %>% 
+      compute_new()
+    
+    cohort_with_all_outcomes <-
+      cohort_with_general_outcomes %>% 
+      left_join(rsv_tbl %>% 
+                  select(person_id, earliest_rsv_evidence), by = "person_id") %>% 
+      mutate(days_til_earliest_rsv_outcome = as.numeric(earliest_rsv_evidence - ce_date)) %>% 
+      mutate(has_postacute_resp_outcome = case_when(
+        !is.na(resp_concept) & days_til_earliest_resp_outcome >= 30 & days_til_earliest_resp_outcome < 180 ~ 1,
+        TRUE ~ 0
+      )) %>% 
+      mutate(has_postacute_general_outcome = case_when(
+        !is.na(general_concept) & days_til_earliest_general_outcome >= 30 & days_til_earliest_general_outcome < 180 ~ 1,
+        TRUE ~ 0
+      )) %>% 
+      mutate(has_postacute_rsv_outcome = case_when(
+        !is.na(earliest_rsv_evidence) & days_til_earliest_rsv_outcome >= 30 & days_til_earliest_rsv_outcome < 180 ~ 1,
+        TRUE ~ 0
+      )) %>% 
+      compute_new()
+    
+    cohort_with_all_outcomes %>% 
+      output_tbl("co_sample_outcome_first_presence")
+    
+    cohort_with_all_outcomes %>% 
+      return()
+    
+  } else if (outcome_type == "count") {
+    ## Generate total number of specific events per person
+    ### this should include deduplication logic, can go into sub-functions
+  }
+  
+}
   
 
 

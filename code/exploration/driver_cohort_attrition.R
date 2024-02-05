@@ -12,6 +12,7 @@ cohort_1_label = "_04211023_"
 odr <- cdm_tbl("observation_derivation_recover") %>% 
   filter(observation_date < ce_end_date, observation_date >= ce_start_date)
 
+## TODO can now delete, this is obsolete
 
 generate_output_unfiltered_cohort <- function(ce_start_date, ce_end_date, cohort_label, odr) {
   eligible_pats <-

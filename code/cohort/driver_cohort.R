@@ -6,6 +6,7 @@
 ## washouts applied: serology and covid test
 ## exclude co-infection or flag
 ## age applied
+### TODO remove file, obsolete now 
 
 ### Cohort data structure:
 

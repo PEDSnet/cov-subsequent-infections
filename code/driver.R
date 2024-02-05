@@ -136,6 +136,71 @@ config_append('extra_packages', c())
   
   
   ### Now use the cohort to generate the analytic dataset with other variables
+  ### APPLY COVARIATES HERE
+  
+  
+  #### APPLY OUTCOMES AND OUTPUT DATASET WITH OUTCOMES
+  ## TODO: Remove this filtering/sampling for final run
+  base_cohort <- results_tbl("base_cohort") %>% 
+    group_by(sub_cohort) %>% 
+    slice_sample(n=100) %>% 
+    ungroup() %>% 
+    compute_new()
+  
+  ## The following tables produce all counts of outcomes, future code turns them into
+  ## trajectories and distinct events
+  ## (the RSV code does do earliest evidence, should modify that)
+  ## Lists of everything so that we can do counts and things like that,
+  # number of outcomes for later 
+  ## TODO should do EDA on these data, to determine rollup logic for outcomes in each category, 
+  # so there needs to be very specific access to this outcome data
+  base_cohort %>% 
+    generate_output_outcome_lists(outcome = "respiratory",
+                                  outcome_start_date = as.Date("2021-07-01"),
+                                 outcome_end_date = as.Date("2023-08-01"),
+                                 output_tbl_name = "co_sample_respiratory_outcomes")
+  
+  base_cohort %>% 
+    generate_output_outcome_lists(outcome = "general",
+      outcome_start_date = as.Date("2021-07-01"),
+                            outcome_end_date = as.Date("2023-08-01"),
+      output_tbl_name = "co_sample_general_outcomes")
+  
+  base_cohort %>% 
+    generate_output_outcome_lists(outcome = "rsv",
+      outcome_start_date = as.Date("2022-04-01"),
+                           outcome_end_date = as.Date("2023-07-01"),
+      output_tbl_name = "co_sample_rsv_outcomes")
+  
+  ## Function to apply outcome definitions, may change under the hood: 
+  presence_outcomes_data <-
+    base_cohort %>% 
+    generate_outcome_dataset(outcome_type = "presence",
+                             respiratory_tbl = results_tbl("co_sample_respiratory_outcomes"),
+                             general_tbl = results_tbl("co_sample_general_outcomes"),
+                             rsv_tbl = results_tbl("co_sample_rsv_outcomes"),
+                             output_tbl_name = "co_sample_outcome_first_presence")
+  
+  ## Function to create analytic dataset for Cox regression and IPTW
+  cox_format_dataframe <- 
+    results_tbl("co_sample_outcome_first_presence") %>% 
+    create_cox_format_df()
+  
+  iptw_metadata <- cox_format_dataframe %>% 
+    add_iptw_weights(estimand = "ATE",
+                     formula_expression = "exposure~ce_days_secular",
+                     output_tbl_name = "co_sample_outcome_first_presence_wts")
+  
+  cox_model_general <- 
+    results_tbl("co_sample_outcome_first_presence_wts") %>% 
+    collect() %>% 
+    perform_cox_model(outcome = "has_postacute_general_outcome",
+                      time_until = "days_til_earliest_general_outcome")
+  
+  ## Write some code to abstract and save results of the models, that can then be pulled in by a markdown script
+  
+  ## 2/6 to start: Goal today will be to develop the visualization logic of patient trajectories, in a markdown script
+  
   
   
 
