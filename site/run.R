@@ -161,7 +161,7 @@ config('results_target',
 #' This Boolean value specifies whether the query log should include
 #' detailed information about execution of SQL queries in the database
 #' @md
-config('db_trace', TRUE)
+config('db_trace', FALSE)
 
 #' Request-specific caching of loaded codesets
 #'

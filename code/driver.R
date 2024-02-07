@@ -52,6 +52,8 @@ config_append('extra_packages', c())
   ## Retain and output demographic information for the unfiltered cohort,
   # in case we want to see if there are already any confounders in the dataset in terms of
   # exclusions we've made for utilization, age, etc. 
+  
+  ## TODO apply age too
   unfiltered_cohort_demo <- generate_output_cohort_demo(
     ce_start_date = ce_start_date,
     ce_end_date = ce_end_date,
@@ -128,7 +130,9 @@ config_append('extra_packages', c())
     filter(study_eligible == 1) %>% 
     filter(washout == 0) %>% 
     filter(cohort_assignment != "No infection") %>% 
+    get_insurance_class() %>% 
     select(person_id, ce_date, sub_cohort = cohort_assignment,
+           insurance_class, 
            mock_medical_complexity, age_cat_at_ce, birth_date,
            sex_cat, cohort_entry_week, visit_type_admin_other_telemed,
            visit_type_outpatient, race_eth_cat, visit_type_inpatient_or_ed) %>% 
@@ -138,14 +142,35 @@ config_append('extra_packages', c())
   ### Now use the cohort to generate the analytic dataset with other variables
   ### APPLY COVARIATES HERE
   
+  ### COVARIATES TO DO:
+  # [x] age
+  # [x] sex
+  # [x] race/eth
+  # [] site
+  # [] PMCA
+  # [] variant (?) time period (derived)
+  # [] severity of index event
+  # [] hospitalization for index
+  # [x] Insurance
+  # [x] utilization (put it in the demo function)
+  # [] Location of index event (ED/inpatient/outpatient)
+  # [] vaccination for index event
+  
   
   #### APPLY OUTCOMES AND OUTPUT DATASET WITH OUTCOMES
   ## TODO: Remove this filtering/sampling for final run
   base_cohort <- results_tbl("base_cohort") %>% 
-    group_by(sub_cohort) %>% 
-    slice_sample(n=100) %>% 
-    ungroup() %>% 
+    filter(sub_cohort %in% c("Covid", "Influenza")) %>% 
+    # group_by(sub_cohort) %>%
+    # slice_sample(n=30) %>%
+    # ungroup() %>%
     compute_new()
+  
+  ## TODO: Still need to do filtering based on outcome for cohort entry period
+  
+  ## If running a sample:
+  base_cohort %>% 
+    output_tbl("co_sample_base_cohort", indexes=c("person_id"))
   
   ## The following tables produce all counts of outcomes, future code turns them into
   ## trajectories and distinct events
@@ -154,45 +179,50 @@ config_append('extra_packages', c())
   # number of outcomes for later 
   ## TODO should do EDA on these data, to determine rollup logic for outcomes in each category, 
   # so there needs to be very specific access to this outcome data
+  output_prefix = "co_sample_" # for sample
+  output_prefix = "co_main_"
+  
   base_cohort %>% 
     generate_output_outcome_lists(outcome = "respiratory",
                                   outcome_start_date = as.Date("2021-07-01"),
                                  outcome_end_date = as.Date("2023-08-01"),
-                                 output_tbl_name = "co_sample_respiratory_outcomes")
+                                 output_tbl_name = paste0(output_prefix, "respiratory_outcomes"))
   
   base_cohort %>% 
     generate_output_outcome_lists(outcome = "general",
       outcome_start_date = as.Date("2021-07-01"),
                             outcome_end_date = as.Date("2023-08-01"),
-      output_tbl_name = "co_sample_general_outcomes")
+      output_tbl_name = paste0(output_prefix, "general_outcomes"))
   
+  ## TODO: Change this function to capture >1 RSV infection
   base_cohort %>% 
     generate_output_outcome_lists(outcome = "rsv",
       outcome_start_date = as.Date("2022-04-01"),
                            outcome_end_date = as.Date("2023-07-01"),
-      output_tbl_name = "co_sample_rsv_outcomes")
+      output_tbl_name = paste0(output_prefix, "rsv_outcomes"))
   
   ## Function to apply outcome definitions, may change under the hood: 
   presence_outcomes_data <-
     base_cohort %>% 
     generate_outcome_dataset(outcome_type = "presence",
-                             respiratory_tbl = results_tbl("co_sample_respiratory_outcomes"),
-                             general_tbl = results_tbl("co_sample_general_outcomes"),
-                             rsv_tbl = results_tbl("co_sample_rsv_outcomes"),
-                             output_tbl_name = "co_sample_outcome_first_presence")
+                             respiratory_tbl = results_tbl(paste0(output_prefix, "respiratory_outcomes")),
+                             general_tbl = results_tbl(paste0(output_prefix, "general_outcomes")),
+                             rsv_tbl = results_tbl(paste0(output_prefix, "rsv_outcomes")),
+                             output_tbl_name = paste0(output_prefix, "outcome_first_presence"))
   
   ## Function to create analytic dataset for Cox regression and IPTW
+  ## Definition function should include logic for outcomes, such as, presence during post-acute phase, etc.
   cox_format_dataframe <- 
-    results_tbl("co_sample_outcome_first_presence") %>% 
+    results_tbl("co_main_outcome_first_presence") %>% 
     create_cox_format_df()
   
   iptw_metadata <- cox_format_dataframe %>% 
     add_iptw_weights(estimand = "ATE",
                      formula_expression = "exposure~ce_days_secular",
-                     output_tbl_name = "co_sample_outcome_first_presence_wts")
+                     output_tbl_name = "co_main_outcome_first_presence_wts")
   
   cox_model_general <- 
-    results_tbl("co_sample_outcome_first_presence_wts") %>% 
+    results_tbl("co_main_outcome_first_presence_wts") %>% 
     collect() %>% 
     perform_cox_model(outcome = "has_postacute_general_outcome",
                       time_until = "days_til_earliest_general_outcome")

@@ -327,7 +327,7 @@ generate_output_cohort_demo <- function(ce_start_date, ce_end_date, cohort_tbl_n
 generate_output_outcome_lists <- function(cohort, outcome, outcome_start_date, outcome_end_date, output_tbl_name) {
   if (outcome == "rsv") {
     outcomes <- cohort %>% 
-      flag_rsv_outcome_draft(outcome_start_date, outcome_end_date) %>% 
+      flag_rsv_outcome(outcome_start_date, outcome_end_date) %>% 
       compute_new(indexes=c("person_id"))
   } else if (outcome == "general") {
     outcomes <- cohort %>% 
@@ -348,12 +348,14 @@ generate_output_outcome_lists <- function(cohort, outcome, outcome_start_date, o
 }
 
 ### Function to compute trajectories for patient outcomes
-compute_patient_trajectories(cohort) {
-  
-}
+# compute_patient_trajectories(cohort) {
+#   
+# }
 
 
-plot_rollup_summary <- function(rolled_up_dx_tbl, n_sample_size = 50, person_labels = FALSE, show_intermed_events = TRUE) {
+plot_rollup_summary <- function(rolled_up_dx_tbl, 
+                                n_sample_size = 50, 
+                                person_labels = FALSE, show_intermed_events = TRUE) {
   if (show_intermed_events) {
     data <- rolled_up_dx_tbl
   } else {
@@ -366,18 +368,18 @@ plot_rollup_summary <- function(rolled_up_dx_tbl, n_sample_size = 50, person_lab
     group_by(person_id) %>% 
     mutate(max_day = max(days_from_ce)) %>% 
     mutate(viz_id=cur_group_id()) %>% 
-    filter(viz_id < n_sample_size) %>% 
-    ungroup() %>% 
+    ungroup() %>%
     mutate(viz_id = fct_reorder(factor(viz_id), max_day)) %>% 
     group_by(person_id, event) %>% 
     mutate(person_event = paste0(person_id, "_", event)) %>% 
+    # ungroup() %>% 
     ggplot() +
     geom_line(aes(x=days_from_ce, y = viz_id, group=person_event),
-              size = 2, alpha = 0.9) +
+              linewidth = 1, alpha = 0.9) +
     geom_line(aes(x=days_from_ce, y = viz_id, group=viz_id),
-              size = 0.25, alpha = 0.2) +
+              linewidth = 0.25, alpha = 0.2) +
     geom_point(aes(x=days_from_ce, y = viz_id, shape = record_flag, col=record_flag),
-               stroke = 1.5,  alpha = .9) +
+               stroke = 1.5,  alpha = .5) +
     theme_bw() +
     scale_color_manual(values = wes_palette("FantasticFox1", n=8, type = "continuous")) +
     labs(x="Days from cohort entry date", y= "Patient ID")
@@ -437,8 +439,8 @@ generate_outcome_dataset <- function(cohort,
     cohort_with_all_outcomes <-
       cohort_with_general_outcomes %>% 
       left_join(rsv_tbl %>% 
-                  select(person_id, earliest_rsv_evidence), by = "person_id") %>% 
-      mutate(days_til_earliest_rsv_outcome = as.numeric(earliest_rsv_evidence - ce_date)) %>% 
+                  select(person_id, rsv_evidence_date), by = "person_id") %>% 
+      mutate(days_til_earliest_rsv_outcome = as.numeric(rsv_evidence_date - ce_date)) %>% 
       mutate(has_postacute_resp_outcome = case_when(
         !is.na(resp_concept) & days_til_earliest_resp_outcome >= 30 & days_til_earliest_resp_outcome < 180 ~ 1,
         TRUE ~ 0
@@ -448,13 +450,13 @@ generate_outcome_dataset <- function(cohort,
         TRUE ~ 0
       )) %>% 
       mutate(has_postacute_rsv_outcome = case_when(
-        !is.na(earliest_rsv_evidence) & days_til_earliest_rsv_outcome >= 30 & days_til_earliest_rsv_outcome < 180 ~ 1,
+        !is.na(rsv_evidence_date) & days_til_earliest_rsv_outcome >= 30 & days_til_earliest_rsv_outcome < 180 ~ 1,
         TRUE ~ 0
       )) %>% 
       compute_new()
     
     cohort_with_all_outcomes %>% 
-      output_tbl("co_sample_outcome_first_presence")
+      output_tbl(output_tbl_name)
     
     cohort_with_all_outcomes %>% 
       return()
@@ -466,6 +468,40 @@ generate_outcome_dataset <- function(cohort,
   
 }
   
+
+get_insurance_class <- function(cohort) {
+  insurance_plans <- cohort %>% 
+    left_join(cdm_tbl("visit_occurrence") %>% 
+                select(visit_occurrence_id, person_id, visit_start_date), by=c("person_id", "ce_date"="visit_start_date")) %>% 
+    left_join(cdm_tbl("visit_payer") %>% 
+                select(visit_occurrence_id, plan_class), by="visit_occurrence_id") %>% 
+    group_by(person_id, plan_class, ce_date) %>% 
+    filter(row_number()==1) %>% 
+    ungroup() %>% 
+    compute_new()
+  
+  insurance_plans_labeled <-
+    insurance_plans %>% 
+    mutate(plan_class_index=case_when(
+      plan_class %in% c("Other public", "Medicaid/sCHIP", "Medicare")~2,
+      plan_class %in% c("Private/Commercial")~1,
+      plan_class %in% c("Self-pay", "Other/Unknown")~0
+    )) %>%
+    group_by(person_id) %>%
+    slice_max(plan_class_index, with_ties=FALSE) %>%
+    mutate(insurance_class=case_when(
+      plan_class_index==2~"public",
+      plan_class_index==1~"private",
+      plan_class_index==0~"other/unknown"
+    )) %>% 
+    compute_new(indexes=c("person_id"))
+  
+  cohort %>% 
+    left_join(insurance_plans_labeled %>% 
+                select(person_id, insurance_class), by="person_id") %>% 
+    return()
+  
+}
 
 
 

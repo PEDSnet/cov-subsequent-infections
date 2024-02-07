@@ -205,14 +205,18 @@ cohort_with_all_outcomes %>%
 # 5 Medicare          
 # 6 Self-pay  
 
-## The beginnings of some insurance DQ:
-results_tbl("base_cohort") %>% 
-  left_join(cdm_tbl("visit_occurrence") %>% 
-              select(visit_occurrence_id, person_id, visit_start_date), by=c("person_id", "ce_date"="visit_start_date")) %>% 
-  left_join(cdm_tbl("visit_payer") %>% 
-              select(visit_occurrence_id, plan_class), by="visit_occurrence_id") %>% 
-  group_by(plan_class) %>% 
-  summarise(n())
+
+
+
+  
+
+# cohort_w_insurance %>% 
+#   group_by(insurance_class, sub_cohort) %>% 
+#   summarise(n = n_distinct(person_id)) %>% 
+#   ungroup() %>% 
+#   mutate(total = sum(n)) %>% 
+#   mutate(prop_pats = n/total)
+
 
 
 

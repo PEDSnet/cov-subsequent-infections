@@ -1,0 +1,338 @@
+---
+title: "Subsequent Infections - Filtered Cohort Summary"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+---
+
+
+This report ...
+
+```{r include=FALSE}
+# Default taken from R notebook behavior: when knitting, wd will always be location of notebook
+base_dir <- '..'
+Sys.setenv(PEDSNET_SKIP_REQUEST_EXECUTION=1)
+try(source('../site/run.R')) # May not be able to make db connection
+
+# Set to "local" to read data from ../results, or another value to read from db
+data_source <- if_else(config('execution_mode') == 'distribution', 'local', 'not_local')
+
+require(tibble)
+require(knitr)
+require(kableExtra)
+require(readr)
+require(table1)
+require(ggplot2)
+require(tidyverse)
+require(lubridate)
+library(wesanderson)
+
+get_results <- function(tbl_name) {
+  if (data_source == 'local') {
+    rslt <- read_csv(paste0('../results/', tbl_name, '.csv'))
+  }
+  else {
+    rslt <- results_tbl(tbl_name) %>% collect()
+  }
+  rslt
+}
+
+
+prettify_kable <- function(data) {
+  data %>% kable(digits = 2, format.args = list(big.mark = ',')) %>% 
+    kable_styling(bootstrap_options = c("striped", "hover")) %>% 
+    column_spec(1, bold = T, border_right = T)
+}
+
+
+```
+
+# Attrition
+
+This attrition table considers the study period to be broadly defined from ____ to ____
+
+Actual cohort sizes will differ based on the specific study periods for the sub-analyses.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+results_tbl("cohort_attrition") %>% 
+  select("Attrition step" = cohort, persons) %>% 
+  filter(persons > 0) %>% 
+  arrange(desc(persons)) %>% 
+  prettify_kable()
+
+results_tbl("base_cohort") %>% 
+  group_by(sub_cohort) %>% 
+  summarise(persons = n_distinct(person_id)) %>% 
+  select("Sub cohort" = sub_cohort, persons) %>% 
+  arrange(desc(persons)) %>% 
+  prettify_kable()
+
+
+```
+
+
+# Table 1, Cohort demographics
+
+TODO: Think about filtering by the study period.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+cohort <- results_tbl("co_sample_base_cohort")
+cohort <- results_tbl("base_cohort") %>% 
+  filter(sub_cohort %in% c("Covid", "Influenza")) 
+
+
+table1(~ sex_cat + race_eth_cat + age_cat_at_ce + 
+         visit_type_admin_other_telemed +
+         visit_type_outpatient + visit_type_inpatient_or_ed + 
+         insurance_class | sub_cohort, 
+       data = cohort)
+
+
+```
+
+# Patient event trajectories
+
+For this plot, we want to show all the events (distinct date + diagnosis concept or lab test) happening to patients of interest:
+
+* Pre-index events captured in the EHR
+
+* Index event
+
+* Post-index events
+
+* Post-acute period events
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=5}
+
+
+respiratory_outcomes <- results_tbl("co_main_respiratory_outcomes") %>% 
+  mutate(outcome = "Respiratory infection") %>% 
+  group_by(person_id, condition_start_date) %>% 
+  filter(row_number()==1) %>% 
+  ungroup() %>% 
+  select(person_id, outcome, outcome_date = condition_start_date)
+
+general_outcomes <- results_tbl("co_main_general_outcomes") %>% 
+  mutate(outcome = "Any infection") %>% 
+  group_by(person_id, condition_start_date) %>% 
+  filter(row_number()==1) %>% 
+  ungroup() %>% 
+  select(person_id, outcome, outcome_date = condition_start_date)
+
+rsv_outcomes <- results_tbl("co_main_rsv_outcomes") %>% 
+  mutate(outcome = "First RSV infection") %>% 
+  group_by(person_id, rsv_evidence_date) %>% 
+  filter(row_number()==1) %>% 
+  ungroup() %>% 
+  select(person_id, outcome, outcome_date = rsv_evidence_date)
+
+## data frame of list of events, per person
+full_outcome_list <-
+  respiratory_outcomes %>% 
+  collect() %>% 
+  rbind(general_outcomes %>% collect()) %>% 
+  rbind(rsv_outcomes %>% collect()) %>% 
+  left_join(cohort %>% select(person_id, ce_date, sub_cohort) %>% collect(), by="person_id") %>% 
+  mutate(days_from_index = as.numeric(outcome_date - ce_date)) %>% 
+  select(person_id, sub_cohort, outcome, days_from_index, ce_date, days_from_index) 
+  
+
+## then left join onto the main cohort
+
+cohort_main_outcomes <- cohort %>% 
+  filter(sub_cohort %in% c("Covid", "Influenza")) %>% 
+  mutate(outcome = paste0("Index ", sub_cohort, " infection")) %>% 
+  mutate(days_from_index = 0) %>% 
+  mutate(outcome_date = ce_date) %>% 
+  select(person_id, sub_cohort, outcome, days_from_index, ce_date, days_from_index) %>% 
+  collect() %>% 
+  rbind(full_outcome_list %>% 
+          filter(days_from_index != 0))
+
+sample_cohort <- cohort %>% 
+  group_by(sub_cohort) %>% 
+  slice_sample(n=50) %>% 
+  ungroup() %>% 
+  collect()
+  
+  
+cohort_main_outcomes %>% 
+  inner_join(sample_cohort %>% select(person_id), by="person_id") %>% 
+  # filter(person_id==5511537) %>% 
+  mutate(event = outcome) %>% 
+  mutate(record_flag = outcome) %>%  
+  mutate(days_from_ce = days_from_index) %>% 
+  plot_rollup_summary() +
+  facet_wrap(~sub_cohort, ncol = 2) +
+  theme(legend.position = "bottom")
+
+
+```
+
+## Table: Outcomes statistics per cohort
+
+Number of respiratory infection records (distict dates) per person, per cohort:
+
+Noticing that there seem to be more events before ce_date for influenza patients, and more events after for covid patients. But, when we look at calendar time of cohort entry dates, that actually makes sense given the calendar time the two waves of the index events happened in. Here we'll examine that phenomenon, and then correct based on within the post-acute window normalized to 30-180 days after the index date, and 180 days before the index date. In analyses, we may want to introduce a variable to control for prior infections?
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+## First: real time density plot of cohort entry dates
+cohort %>% 
+  ggplot() +
+  geom_density(aes(x=ce_date, fill=sub_cohort), alpha=0.5) +
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous"))
+
+## Plot of days_til
+cohort_main_outcomes %>% 
+  filter(sub_cohort %in% c("Covid", "Influenza")) %>% 
+  filter(days_from_index != 0) %>% 
+  ggplot() +
+  geom_density(aes(x=days_from_index, fill=sub_cohort), alpha=0.5) +
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous"))
+
+
+## Number before, vs. number after
+cohort_main_outcomes %>% 
+  filter(sub_cohort %in% c("Covid", "Influenza")) %>% 
+  filter(days_from_index != 0) %>% 
+  mutate(event_is = ifelse(days_from_index <0, "before", "after")) %>% 
+  group_by(person_id, sub_cohort, event_is) %>%
+  summarise(n_outcomes = n_distinct(days_from_index)) %>%
+  ungroup() %>%
+  group_by(event_is, sub_cohort) %>% 
+  mutate(median_n_outcomes = median(n_outcomes)) %>% 
+  group_by(sub_cohort, event_is, median_n_outcomes, n_outcomes) %>%
+  # summarise(avg_n = mean(n),
+  #           variance = var(n)) %>% 
+  summarise(n_pats = n_distinct(person_id)) %>% 
+  ungroup() %>% 
+  group_by(sub_cohort, event_is) %>% 
+  mutate(total_pats = sum(n_pats)) %>% 
+  ungroup() %>% 
+  mutate(prop_pats = n_pats/total_pats) %>% 
+  filter(n_outcomes < 30) %>% 
+  ggplot() +
+  geom_bar(aes(x=n_outcomes, y = prop_pats, fill=sub_cohort, color=sub_cohort), stat="identity", position="dodge", alpha=0.7) +
+  geom_vline(aes(xintercept=median_n_outcomes, color=sub_cohort, label="median number of outcomes"), alpha=0.5) +
+  # geom_boxplot(aes(x=event_is, y = n, fill=sub_cohort)) +
+  # geom_violin(aes(x=event_is, y = n, fill=sub_cohort)) +
+  # geom_point(aes(x=outcome, y = variance, color=sub_cohort), position="dodge") +
+  theme_bw() +
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  facet_wrap(~event_is, scales = "free", ncol=2)
+  # facet_wrap(~outcome, scales="free", ncol=3)
+
+event_data <- cohort_main_outcomes %>% 
+  filter(sub_cohort %in% c("Covid", "Influenza")) %>% 
+  filter(days_from_index != 0) %>% 
+  mutate(event_is = ifelse(days_from_index <0, "before", "after"))
+  
+
+table1(~ event_is | sub_cohort, 
+       data = event_data)
+
+table1(~ event_is | outcome*sub_cohort, 
+       data = event_data)
+
+
+```
+
+Now making sure that outcome is within 180 days before and 180 days after, and see:
+
+Worth noting that due to the nature of the RSV spike, the sample is imbalanced in terms of what proportion of each cohort has an outcome following their index infection, vs. prior to their index infection. This should potentially be taken into account and included as a covariate (prior presence of the outcome). 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+## Plot of days_til
+cohort_main_outcomes %>% 
+  filter(sub_cohort %in% c("Covid", "Influenza")) %>% 
+  filter(days_from_index != 0) %>% 
+  filter(abs(days_from_index) <= 180) %>% 
+  ggplot() +
+  geom_density(aes(x=days_from_index, fill=sub_cohort), alpha=0.5) +
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous"))
+
+cohort_main_outcomes %>% 
+  filter(sub_cohort %in% c("Covid", "Influenza")) %>% 
+  filter(days_from_index != 0) %>% 
+  filter(abs(days_from_index) <= 180) %>% 
+  ggplot() +
+  geom_density(aes(x=days_from_index, fill=sub_cohort), alpha=0.5) +
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  facet_wrap(~outcome, scales="free", ncol=3)
+
+
+event_data <- cohort_main_outcomes %>% 
+  filter(sub_cohort %in% c("Covid", "Influenza")) %>% 
+  filter(days_from_index != 0) %>% 
+  filter(abs(days_from_index) <= 180) %>% 
+  mutate(event_is = ifelse(days_from_index <0, "before", "after"))
+  
+
+table1(~ event_is | sub_cohort, 
+       data = event_data)
+
+table1(~ event_is | outcome*sub_cohort, 
+       data = event_data)
+
+
+```
+
+### List of most common outcome concepts per outcome group
+
+<details>
+  <summary>Most popular concepts for "any infection" outcomes</summary>
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+general_outcomes <- results_tbl("co_main_general_outcomes") %>% 
+  mutate(outcome = "Any infection") %>% 
+  group_by(person_id, condition_start_date) %>% 
+  filter(row_number()==1) %>% 
+  ungroup() %>% 
+  group_by(concept_name) %>% 
+  summarise(n_patients = n_distinct(person_id)) %>% 
+  compute_new()
+
+general_outcomes %>% 
+  arrange(desc(n_patients)) %>% 
+  head(30) %>% 
+  prettify_kable()
+
+
+```
+</details>
+
+<details>
+  <summary>Most popular concepts for respiratory outcomes</summary>
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+respiratory_outcomes <- results_tbl("co_main_respiratory_outcomes") %>% 
+  mutate(outcome = "Respiratory infection") %>% 
+  group_by(person_id, condition_start_date) %>% 
+  filter(row_number()==1) %>% 
+  ungroup() %>% 
+  group_by(concept_name) %>% 
+  summarise(n_patients = n_distinct(person_id)) %>% 
+  compute_new()
+
+respiratory_outcomes %>% 
+  arrange(desc(n_patients)) %>% 
+  head(30) %>% 
+  prettify_kable()
+
+
+```
+</details>
+
