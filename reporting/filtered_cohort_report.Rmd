@@ -9,7 +9,7 @@ output:
 ---
 
 
-This report ...
+This report is a data quality and availability assessment of patients from the entire study period and examines characteristics of patients who fit the cohort inclusion criteria. This report catalogs demographic information, covariate availability, and examines outcome variables in development. 
 
 ```{r include=FALSE}
 # Default taken from R notebook behavior: when knitting, wd will always be location of notebook
@@ -52,9 +52,13 @@ prettify_kable <- function(data) {
 
 # Attrition
 
-This attrition table considers the study period to be broadly defined from ____ to ____
+This attrition table considers the study period to be broadly defined from *June 1, 2021* to *April 1, 2023*. 
 
-Actual cohort sizes will differ based on the specific study periods for the sub-analyses.
+Actual cohort sizes for sub-analyses and sub-cohort groups may differ based on the specific study periods for the sub-analyses.
+
+## Attrition steps for cohort inclusion 
+
+Attrition based on cohort inclusion criteria. 
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
@@ -63,6 +67,13 @@ results_tbl("cohort_attrition") %>%
   filter(persons > 0) %>% 
   arrange(desc(persons)) %>% 
   prettify_kable()
+
+```
+
+
+Breakdown of patients based on sub-cohort (index infection). 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
 results_tbl("base_cohort") %>% 
   group_by(sub_cohort) %>% 
@@ -77,7 +88,7 @@ results_tbl("base_cohort") %>%
 
 # Table 1, Cohort demographics
 
-TODO: Think about filtering by the study period.
+Table 1 of available covariates. For this table, the cohort was filtered down to patients who only had either Influenza or SARS-CoV-2. Patients who had both were excluded (see table above).
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
@@ -88,8 +99,8 @@ cohort <- results_tbl("base_cohort") %>%
 
 table1(~ sex_cat + race_eth_cat + age_cat_at_ce + 
          visit_type_admin_other_telemed +
-         visit_type_outpatient + visit_type_inpatient_or_ed + 
-         insurance_class | sub_cohort, 
+         visit_type_outpatient + visit_type_inpatient_or_ed + insurance_class
+         | sub_cohort, 
        data = cohort)
 
 
@@ -107,7 +118,9 @@ For this plot, we want to show all the events (distinct date + diagnosis concept
 
 * Post-acute period events
 
-```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=5}
+A random sample of patients in each sub-cohort have been selected for this visualization.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=6}
 
 
 respiratory_outcomes <- results_tbl("co_main_respiratory_outcomes") %>% 
@@ -169,12 +182,14 @@ cohort_main_outcomes %>%
   mutate(days_from_ce = days_from_index) %>% 
   plot_rollup_summary() +
   facet_wrap(~sub_cohort, ncol = 2) +
-  theme(legend.position = "bottom")
+  theme(legend.position = "top")
 
 
 ```
 
-## Table: Outcomes statistics per cohort
+## Outcomes (data quality / variable development)
+
+### Entire study period
 
 Number of respiratory infection records (distict dates) per person, per cohort:
 
@@ -188,7 +203,9 @@ cohort %>%
   ggplot() +
   geom_density(aes(x=ce_date, fill=sub_cohort), alpha=0.5) +
   theme_bw() + 
-  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous"))
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  labs(x="Cohort entry date", y = "Density") +
+  theme(legend.position = "top")
 
 ## Plot of days_til
 cohort_main_outcomes %>% 
@@ -197,7 +214,9 @@ cohort_main_outcomes %>%
   ggplot() +
   geom_density(aes(x=days_from_index, fill=sub_cohort), alpha=0.5) +
   theme_bw() + 
-  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous"))
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  labs(x="Days from index date to outcome date", y ="Density") +
+  theme(legend.position = "top")
 
 
 ## Number before, vs. number after
@@ -229,7 +248,9 @@ cohort_main_outcomes %>%
   theme_bw() +
   scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
   scale_color_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
-  facet_wrap(~event_is, scales = "free", ncol=2)
+  facet_wrap(~event_is, scales = "free", ncol=2) +
+  labs(x="Number of outcomes, before or after index date", y = "Fraction of cohort") +
+  theme(legend.position = "top")
   # facet_wrap(~outcome, scales="free", ncol=3)
 
 event_data <- cohort_main_outcomes %>% 
@@ -247,6 +268,9 @@ table1(~ event_is | outcome*sub_cohort,
 
 ```
 
+
+### Within pre-acute and post-acute period
+
 Now making sure that outcome is within 180 days before and 180 days after, and see:
 
 Worth noting that due to the nature of the RSV spike, the sample is imbalanced in terms of what proportion of each cohort has an outcome following their index infection, vs. prior to their index infection. This should potentially be taken into account and included as a covariate (prior presence of the outcome). 
@@ -261,7 +285,9 @@ cohort_main_outcomes %>%
   ggplot() +
   geom_density(aes(x=days_from_index, fill=sub_cohort), alpha=0.5) +
   theme_bw() + 
-  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous"))
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  labs(x="Days from index date to outcome date", y ="Density") +
+  theme(legend.position = "top")
 
 cohort_main_outcomes %>% 
   filter(sub_cohort %in% c("Covid", "Influenza")) %>% 
@@ -271,7 +297,9 @@ cohort_main_outcomes %>%
   geom_density(aes(x=days_from_index, fill=sub_cohort), alpha=0.5) +
   theme_bw() + 
   scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
-  facet_wrap(~outcome, scales="free", ncol=3)
+  facet_wrap(~outcome, scales="free", ncol=3) +
+  labs(x="Days from index date to outcome date", y ="Density") +
+  theme(legend.position = "top")
 
 
 event_data <- cohort_main_outcomes %>% 
