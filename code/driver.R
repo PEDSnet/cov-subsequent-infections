@@ -31,10 +31,10 @@ config_append('extra_packages', c())
   rslt <- list()
   
   ###### Create cohort here:
-  ce_start_date = as.Date("2021-04-01")
-  ce_end_date = as.Date("2023-10-01")
+  ce_start_date = as.Date("2021-06-01")
+  ce_end_date = as.Date("2023-04-01")
   # cohort_1_label = "_06210223_"
-  cohort_1_label = "_04211023_"
+  cohort_1_label = "_06210423_"
   odr <- cdm_tbl("observation_derivation_recover") %>% 
     filter(observation_date < ce_end_date, observation_date >= ce_start_date)
   
