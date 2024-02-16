@@ -17,7 +17,7 @@ flag_outcome_infections <- function(cohort, outcome_start_date, outcome_end_date
     inner_join(cohort %>%  # shouldn't this be an inner join??
                 select(person_id) %>% 
                 left_join(cdm_tbl("condition_occurrence") %>% 
-                            select(condition_source_concept_id, person_id, site, condition_start_date) %>% 
+                            select(visit_occurrence_id, condition_occurrence_id, condition_source_concept_id, person_id, site, condition_start_date) %>% 
                             filter(condition_start_date < outcome_end_date, condition_start_date >= outcome_start_date),
                           by="person_id") %>% compute_new(indexes=c("person_id", "condition_source_concept_id")), 
               by=c("concept_id"="condition_source_concept_id")) %>% 
@@ -47,7 +47,7 @@ flag_outcome_resp_infections <- function(cohort, outcome_start_date, outcome_end
     inner_join(cohort %>% 
                 select(person_id) %>% 
                 left_join(cdm_tbl("condition_occurrence") %>% 
-                            select(condition_source_concept_id, person_id, site, condition_start_date) %>% 
+                            select(visit_occurrence_id, condition_occurrence_id, condition_source_concept_id, person_id, site, condition_start_date) %>% 
                             filter(condition_start_date < outcome_end_date, condition_start_date >= outcome_start_date),
                           by="person_id") %>% compute_new(indexes=c("person_id", "condition_source_concept_id")), 
               by=c("concept_id"="condition_source_concept_id")) %>% 
@@ -75,7 +75,7 @@ flag_rsv_outcome <- function(cohort, outcome_start_date, outcome_end_date) {
     left_join(cohort %>% 
                 select(person_id) %>% 
                 left_join(cdm_tbl("condition_occurrence") %>% 
-                            select(condition_source_concept_id, person_id, site, condition_start_date) %>% 
+                            select(visit_occurrence_id, condition_occurrence_id, condition_source_concept_id, person_id, site, condition_start_date) %>% 
                             filter(condition_start_date < outcome_end_date, condition_start_date >= outcome_start_date),
                           by="person_id") %>% compute_new(indexes=c("person_id", "condition_source_concept_id")), 
               by=c("concept_id"="condition_source_concept_id")) %>% 

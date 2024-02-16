@@ -160,7 +160,7 @@ config_append('extra_packages', c())
   #### APPLY OUTCOMES AND OUTPUT DATASET WITH OUTCOMES
   ## TODO: Remove this filtering/sampling for final run
   base_cohort <- results_tbl("base_cohort") %>% 
-    filter(sub_cohort %in% c("Covid", "Influenza")) %>% 
+    # filter(sub_cohort %in% c("Covid", "Influenza")) %>% 
     # group_by(sub_cohort) %>%
     # slice_sample(n=30) %>%
     # ungroup() %>%

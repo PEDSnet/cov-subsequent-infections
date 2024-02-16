@@ -1,0 +1,452 @@
+---
+title: "Subsequent Infections - Outcomes (infections) DQ & Exploration"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+---
+
+
+
+```{r include=FALSE}
+# Default taken from R notebook behavior: when knitting, wd will always be location of notebook
+base_dir <- '..'
+Sys.setenv(PEDSNET_SKIP_REQUEST_EXECUTION=1)
+try(source('../site/run.R')) # May not be able to make db connection
+
+# Set to "local" to read data from ../results, or another value to read from db
+data_source <- if_else(config('execution_mode') == 'distribution', 'local', 'not_local')
+
+require(tibble)
+require(knitr)
+require(kableExtra)
+require(readr)
+require(table1)
+require(ggplot2)
+require(tidyverse)
+require(lubridate)
+library(wesanderson)
+
+get_results <- function(tbl_name) {
+  if (data_source == 'local') {
+    rslt <- read_csv(paste0('../results/', tbl_name, '.csv'))
+  }
+  else {
+    rslt <- results_tbl(tbl_name) %>% collect()
+  }
+  rslt
+}
+
+
+prettify_kable <- function(data) {
+  data %>% kable(digits = 2, format.args = list(big.mark = ',')) %>% 
+    kable_styling(bootstrap_options = c("striped", "hover")) %>% 
+    column_spec(1, bold = T, border_right = T)
+}
+
+
+```
+
+
+
+<!-- ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE} -->
+
+<!-- results_tbl("cohort_attrition") %>%  -->
+<!--   select("Attrition step" = cohort, persons) %>%  -->
+<!--   filter(persons > 0) %>%  -->
+<!--   arrange(desc(persons)) %>%  -->
+<!--   prettify_kable() -->
+
+<!-- ``` -->
+
+
+<!-- Breakdown of patients based on sub-cohort (index infection).  -->
+
+<!-- ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE} -->
+
+<!-- results_tbl("base_cohort") %>%  -->
+<!--   group_by(sub_cohort) %>%  -->
+<!--   summarise(persons = n_distinct(person_id)) %>%  -->
+<!--   select("Sub cohort" = sub_cohort, persons) %>%  -->
+<!--   arrange(desc(persons)) %>%  -->
+<!--   prettify_kable() -->
+
+
+<!-- ``` -->
+
+# Cohort outcomes (rough)
+
+## Sub-cohorts (time anchor based)
+
+***Main group: CE period from June 1, 2021 to Feb 1, 2023***
+
+Things we want to see: cohort size, demographics, and then outcome statistics
+
+Let's first just look at the proportion of patients with at least one infection during their post acute period (at all) before assessing counts of distinct infections, repeat dx codes pertaining to an ongoing infection, etc.
+
+Also keep an eye on the flu/covid inclusion/exclusion issue (having to do with cohort inclusion events being the same as outcome events).
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=12, fig.height=8}
+main_cohort <-
+  results_tbl("base_cohort") %>% 
+  filter(ce_date >= as.Date("2021-06-01"),
+         ce_date < as.Date("2023-02-01")) %>% 
+  compute_new(indexes=c("person_id"))
+
+rsv_study_cohort <-
+  results_tbl("base_cohort") %>% 
+  filter(ce_date >= as.Date("2022-03-01"),
+         ce_date < as.Date("2023-01-01")) %>% 
+  compute_new(indexes=c("person_id"))
+
+main_cohort %>% group_by(sub_cohort) %>% 
+  summarise(n_pats = n_distinct(person_id)) %>% 
+  arrange(desc(n_pats)) %>% 
+  prettify_kable()
+
+```
+
+
+***RSV sub-group: CE period from March 1, 2022 to Jan 1, 2023***
+
+
+<!-- For this plot, we want to show all the events (distinct date + diagnosis concept or lab test) happening to patients of interest: -->
+
+<!-- * Pre-index events captured in the EHR -->
+
+<!-- * Index event -->
+
+<!-- * Post-index events -->
+
+<!-- * Post-acute period events -->
+
+<!-- A random sample of patients in each sub-cohort have been selected for this visualization. -->
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=12, fig.height=8}
+
+rsv_study_cohort %>% group_by(sub_cohort) %>% 
+  summarise(n_pats = n_distinct(person_id)) %>% 
+  arrange(desc(n_pats)) %>% 
+  prettify_kable()
+
+main_cohort_resp_outcomes <- results_tbl("co_main_respiratory_outcomes") %>% 
+  inner_join(main_cohort %>% 
+               select(person_id, sub_cohort, ce_date), by="person_id") %>% 
+  mutate(outcome = "Respiratory infection") %>% 
+  group_by(person_id, condition_start_date) %>% 
+  filter(row_number()==1) %>% 
+  ungroup() %>% 
+  select(person_id, sub_cohort, ce_date, outcome, outcome_date = condition_start_date,
+         concept_id, concept_name) %>% 
+  compute_new()
+
+main_cohort_general_outcomes <- results_tbl("co_main_general_outcomes") %>% 
+  inner_join(main_cohort %>% 
+               select(person_id, sub_cohort, ce_date), by="person_id") %>% 
+  mutate(outcome = "Respiratory infection") %>% 
+  group_by(person_id, condition_start_date) %>% 
+  filter(row_number()==1) %>% 
+  ungroup() %>% 
+  select(person_id, sub_cohort, ce_date, outcome, outcome_date = condition_start_date,
+         concept_id, concept_name) %>% 
+  compute_new()
+
+rsv_cohort_rsv_outcomes <- results_tbl("co_main_rsv_outcomes") %>% 
+  inner_join(rsv_study_cohort %>% 
+               select(person_id, sub_cohort, ce_date), by="person_id") %>% 
+  mutate(outcome = "RSV infection") %>% 
+  group_by(person_id, rsv_evidence_date) %>% 
+  filter(row_number()==1) %>% 
+  ungroup() %>% 
+  select(person_id, sub_cohort, ce_date, outcome, outcome_date = rsv_evidence_date) %>% 
+  compute_new()
+
+```
+
+## Outcomes 
+
+***Question 0: What proportion of each sub-cohort has at least one outcome during the follow up period:***
+
+Respiratory outcomes:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=12, fig.height=8}
+
+prop_diagnoses_after_index <-
+  main_cohort_resp_outcomes %>% 
+  filter(outcome_date > ce_date + days(30), outcome_date < ce_date + days(180)) %>% 
+  group_by(concept_name, sub_cohort) %>% 
+  summarise(n_patients = n_distinct(person_id)) %>% 
+  ungroup() %>% 
+  left_join(main_cohort %>% 
+              group_by(sub_cohort) %>% 
+              summarise(n_total_cohort = n_distinct(person_id)), by="sub_cohort") %>% 
+  mutate(prop_pats = as.numeric(n_patients)/as.numeric(n_total_cohort)) %>% 
+  mutate(percent_pats = paste0(round(prop_pats*100, 2), "%")) %>% 
+  compute_new()
+
+prop_diagnoses_after_index %>% 
+  filter(prop_pats > .01) %>% 
+  collect() %>% 
+  mutate(concept_name_ordered = fct_reorder(concept_name, prop_pats)) %>% 
+  ggplot() +
+  geom_bar(aes(x=concept_name_ordered, y = prop_pats, fill = sub_cohort), stat="identity", position="dodge") +
+  coord_flip() +
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=8, type = "continuous")) +
+  theme(legend.position = "top") +
+  ggtitle("Respiratory outcomes by concept")
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=6}
+
+### Proportion of total people with at least one future infection at all
+prop_any_resp_infection <-
+  main_cohort_resp_outcomes %>% 
+  filter(outcome_date >= ce_date + days(30), outcome_date < ce_date + days(180)) %>% 
+  group_by(sub_cohort) %>% 
+  summarise(n_patients = n_distinct(person_id)) %>% 
+  ungroup() %>% 
+  left_join(main_cohort %>% 
+              group_by(sub_cohort) %>% 
+              summarise(n_total_cohort = n_distinct(person_id)), by="sub_cohort") %>% 
+  mutate(prop_pats = as.numeric(n_patients)/as.numeric(n_total_cohort)) %>% 
+  mutate(percent_pats = paste0(round(prop_pats*100, 2), "%")) %>% 
+  compute_new()
+
+prop_any_resp_infection %>% 
+  ggplot() +
+  geom_bar(aes(x=sub_cohort, y = prop_pats, fill=sub_cohort), stat="identity") +
+  geom_label(aes(x=sub_cohort, y = .8*prop_pats, label=percent_pats)) +
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=8, type = "continuous")) +
+  labs(x="Sub cohort", y = "Percent patients") +
+  ggtitle("Percent of patients with the presence of any post-acute respiratory infection") +
+  theme(legend.position = "top")
+
+
+```
+
+Any infection:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=12, fig.height=8}
+prop_diagnoses_after_index <-
+  main_cohort_general_outcomes %>% 
+  filter(outcome_date > ce_date + days(30), outcome_date < ce_date + days(180)) %>% 
+  group_by(concept_name, sub_cohort) %>% 
+  summarise(n_patients = n_distinct(person_id)) %>% 
+  ungroup() %>% 
+  left_join(main_cohort %>% 
+              group_by(sub_cohort) %>% 
+              summarise(n_total_cohort = n_distinct(person_id)), by="sub_cohort") %>% 
+  mutate(prop_pats = as.numeric(n_patients)/as.numeric(n_total_cohort)) %>% 
+  mutate(percent_pats = paste0(round(prop_pats*100, 2), "%")) %>% 
+  compute_new()
+
+prop_diagnoses_after_index %>% 
+  filter(prop_pats > .01) %>% 
+  collect() %>% 
+  mutate(concept_name_ordered = fct_reorder(concept_name, prop_pats)) %>% 
+  ggplot() +
+  geom_bar(aes(x=concept_name_ordered, y = prop_pats, fill = sub_cohort), stat="identity", position="dodge") +
+  coord_flip() +
+  theme_bw() +
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=8, type = "continuous")) +
+  theme(legend.position = "top") +
+  ggtitle("General infection presence, by top concepts")
+
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=6}
+
+
+
+### Proportion of total people with at least one future infection at all
+prop_any_general_infection <-
+  main_cohort_general_outcomes %>% 
+  filter(outcome_date >= ce_date + days(30), outcome_date < ce_date + days(180)) %>% 
+  group_by(sub_cohort) %>% 
+  summarise(n_patients = n_distinct(person_id)) %>% 
+  ungroup() %>% 
+  left_join(main_cohort %>% 
+              group_by(sub_cohort) %>% 
+              summarise(n_total_cohort = n_distinct(person_id)), by="sub_cohort") %>% 
+  mutate(prop_pats = as.numeric(n_patients)/as.numeric(n_total_cohort)) %>% 
+  mutate(percent_pats = paste0(round(prop_pats*100, 2), "%")) %>% 
+  compute_new()
+
+prop_any_general_infection %>% 
+  ggplot() +
+  geom_bar(aes(x=sub_cohort, y = prop_pats, fill=sub_cohort), stat="identity") +
+  geom_label(aes(x=sub_cohort, y = .8*prop_pats, label=percent_pats)) +
+  theme_bw() +
+  labs(x="Sub cohort", y = "Percent patients") +
+  ggtitle("Percent of patients with the presence of any post-acute infection") +
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=8, type = "continuous")) +
+  theme(legend.position = "top")
+
+
+```
+
+RSV infection:
+
+(for cohort subgroup sub time frame):
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=6}
+
+### Proportion of total people with at least one future infection at all
+prop_rsv_infection <-
+  rsv_cohort_rsv_outcomes %>% 
+  filter(outcome_date >= ce_date + days(30), outcome_date < ce_date + days(180)) %>% 
+  group_by(sub_cohort) %>% 
+  summarise(n_patients = n_distinct(person_id)) %>% 
+  ungroup() %>% 
+  left_join(rsv_study_cohort %>% 
+              group_by(sub_cohort) %>% 
+              summarise(n_total_cohort = n_distinct(person_id)), by="sub_cohort") %>% 
+  mutate(prop_pats = as.numeric(n_patients)/as.numeric(n_total_cohort)) %>% 
+  mutate(percent_pats = paste0(round(prop_pats*100, 2), "%")) %>% 
+  compute_new()
+
+prop_rsv_infection %>% 
+  ggplot() +
+  geom_bar(aes(x=sub_cohort, y = prop_pats, fill=sub_cohort), stat="identity") +
+  geom_label(aes(x=sub_cohort, y = .8*prop_pats, label=percent_pats)) +
+  theme_bw() +
+  labs(x="Sub cohort", y = "Percent patients") +
+  ggtitle("Percent of patients with the presence of post-acute RSV infection") +
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=8, type = "continuous"))
+
+
+```
+
+***Question 1: What are the source concepts for each the outcomes like?***
+
+Use the concept_ids. I think these are the right things (source concept id's) but we can change if not.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=6}
+
+
+
+```
+
+***Question 2: What is the distribution of days between infections, and are the dx codes distinct***
+
+How many distinct concept names does a person have:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=6}
+
+main_cohort_resp_outcomes %>% 
+  group_by(person_id) %>% 
+  summarise(n_concepts = n_distinct(concept_name)) %>% 
+  ungroup() %>% 
+  group_by(n_concepts) %>% 
+  summarise(n_pats = n_distinct(person_id)) %>% 
+  ggplot() +
+  geom_bar(aes(x=n_concepts, y = n_pats), stat="identity") +
+  labs(x="Number of unique infection concepts per person", y = "Number of patients") +
+  theme_bw() +
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=8, type = "continuous"))
+
+
+```
+
+What is the distribution of days between distinct diagnosis, and then between diagnoses at all (per patient)
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=6}
+
+
+unique_diagnosis_list <- main_cohort_resp_outcomes %>% 
+  group_by(person_id) %>% 
+  mutate(next_date = lead(outcome_date, order_by = outcome_date), 
+         next_outcome_concept = lead(concept_name, order_by = outcome_date)) %>% 
+  ungroup() %>% 
+  mutate(days_til_next_dx = as.numeric(next_date-outcome_date)) %>% 
+  mutate(next_dx_is_different = ifelse(concept_name==next_outcome_concept, 0, 1)) %>% 
+  filter(next_dx_is_different==1) %>% 
+  compute_new()
+
+unique_diagnosis_list %>% 
+  ggplot() +
+  geom_histogram(aes(x=days_til_next_dx, fill=sub_cohort), bins=50, alpha=0.5) +
+  facet_wrap(~sub_cohort, ncol=2, scales = "free") +
+  labs(x="Days until next unique diagnosis", y = "Number of diagnoses in diagnosis outcomes") +
+  theme_bw() +
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=8, type = "continuous"))
+  
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=20}
+
+full_outcome_list <-
+  unique_diagnosis_list %>% select(-ce_date) %>% 
+  collect() %>% 
+  left_join(main_cohort %>% select(person_id, ce_date) %>% collect(), by="person_id") %>% 
+  mutate(days_from_index = as.numeric(outcome_date - ce_date)) %>% 
+  select(person_id, sub_cohort, outcome, days_from_index, ce_date, days_from_index) 
+
+cohort_main_outcomes <- main_cohort %>% 
+  filter(sub_cohort %in% c("Covid", "Influenza")) %>% 
+  mutate(outcome = paste0("Index ", sub_cohort, " infection")) %>% 
+  mutate(days_from_index = 0) %>% 
+  mutate(outcome_date = ce_date) %>% 
+  select(person_id, sub_cohort, outcome, days_from_index, ce_date, days_from_index) %>% 
+  collect() %>% 
+  rbind(full_outcome_list %>% 
+          filter(days_from_index != 0))
+
+sample_cohort <- cohort_main_outcomes %>% 
+  select(person_id, sub_cohort) %>% 
+  group_by(sub_cohort) %>% 
+  slice_sample(n=300) %>% 
+  ungroup() %>% 
+  collect()
+  
+  
+cohort_main_outcomes %>% 
+  inner_join(sample_cohort %>% select(person_id), by="person_id") %>% 
+  # filter(person_id==5511537) %>% 
+  mutate(event = outcome) %>% 
+  mutate(record_flag = outcome) %>%  
+  mutate(days_from_ce = days_from_index) %>% 
+  plot_rollup_summary() +
+  facet_wrap(~sub_cohort, ncol = 2) +
+  theme(legend.position = "top")
+
+
+## Limit to post acute period
+cohort_main_outcomes %>% 
+  filter(days_from_index > -1, days_from_index < 183) %>% 
+  inner_join(sample_cohort %>% select(person_id), by="person_id") %>% 
+  # filter(person_id==5511537) %>% 
+  mutate(event = outcome) %>% 
+  mutate(record_flag = outcome) %>%  
+  mutate(days_from_ce = days_from_index) %>% 
+  plot_rollup_summary() +
+  facet_wrap(~sub_cohort, ncol = 2) +
+  theme(legend.position = "top")
+
+
+```
+
+
+***Question 3: What are the proportions of patients with each outcome***
+
+Sub categories: Proportion of covid vs. influenza patients overall with at least one a) respiratory, b) any general infection during the post-acute period after their index date
+
+TODO: Look into whether covid patients aren't getting their influenza outcomes counted, because they were assigned the cohort based on never having influenza (covid then influenza group, maybe that group can get pulled into the covid group, and the influenza then covid group can get pulled into the influenza group)
+
+Next sub category: Proportion of covid vs. flu pats with at least one a) repiratory b) any infection during post-acute period, broken down by proportion of index week/month
+
+Next: Prop of covid vs. flu pats w at least one RSV infection during the post-acute period, broken down by time, demographic, etc.
+
+
+
+
+***Question 4: What are the utilization numbers like in the cohort, to support picking cut points for categories***
+
+(not urgent for 2/15)
+
