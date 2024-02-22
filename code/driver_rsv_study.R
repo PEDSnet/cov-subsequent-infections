@@ -126,7 +126,7 @@ config_append('extra_packages', c())
     group_by(sub_cohort, washout_reason) %>% 
     summarise(n=n_distinct(person_id)) %>% 
     output_tbl(paste0(cohort_1_label, "_washout_reasons"))
-    
+
   ## Final cohort
   rslt$final_cohort <- rslt$other_washout_reasons %>% 
     filter(study_eligible == 1) %>% 
@@ -152,9 +152,12 @@ config_append('extra_packages', c())
   
   output_sum(name = paste0(cohort_1_label, "_attrition"))
   
-  rslt$final_cohort %>% 
+  rslt$final_cohort_demo <-
+    rslt$final_cohort %>% 
     cohort_demo() %>% 
-    get_insurance_class() %>% 
+    get_insurance_class() 
+  
+  rslt$final_cohort_demo %>% 
     output_tbl(paste0(cohort_1_label, "_cohort_demo"), indexes=c("person_id"))
   
   ## Step 2
