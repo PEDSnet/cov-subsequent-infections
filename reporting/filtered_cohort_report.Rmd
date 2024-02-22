@@ -92,7 +92,7 @@ Table 1 of available covariates. For this table, the cohort was filtered down to
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
-cohort <- results_tbl("co_sample_base_cohort")
+#cohort <- results_tbl("co_sample_base_cohort")
 cohort <- results_tbl("base_cohort") %>% 
   filter(sub_cohort %in% c("Covid", "Influenza")) 
 

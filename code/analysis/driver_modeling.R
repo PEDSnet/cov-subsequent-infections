@@ -80,14 +80,24 @@ cox_mod_adj <- coxph(Surv(days_til_earliest_general_outcome, has_postacute_gener
 
 summary(cox_mod_adj)
 
-perform_cox_model <- function(cox_data, outcome, time_until) {
-  cox_mod_adj <- coxph(Surv(days_til_earliest_general_outcome, has_postacute_general_outcome) ~ 
-                         exposure + ce_days_secular + race_eth_cat, #need the time to event TODO start here on Tuesday
-                       data=cox_data,
-                       weights = wts)
+perform_cox_model <- function(cox_data, outcome, time_until, weighted = TRUE) {
   
-  summary(cox_mod_adj) %>% 
-    return()
+  if (weighted == FALSE) {
+    cox_mod_adj <- coxph(Surv(days_til_earliest_general_outcome, has_postacute_general_outcome) ~ 
+                           exposure + ce_days_secular + race_eth_cat, #need the time to event TODO start here on Tuesday
+                         data=cox_data)
+    
+    summary(cox_mod_adj) %>% 
+      return()
+  } else {
+    cox_mod_adj <- coxph(Surv(days_til_earliest_general_outcome, has_postacute_general_outcome) ~ 
+                           exposure + ce_days_secular + race_eth_cat, #need the time to event TODO start here on Tuesday
+                         data=cox_data,
+                         weights = wts)
+    
+    summary(cox_mod_adj) %>% 
+      return()
+  }
 }
 
 SurvFun <- function(fun.time, fun.event, grouping = 1, fun.dat) {

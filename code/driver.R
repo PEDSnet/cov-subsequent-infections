@@ -204,6 +204,7 @@ config_append('extra_packages', c())
   ## Function to apply outcome definitions, may change under the hood: 
   presence_outcomes_data <-
     base_cohort %>% 
+    compute_new(indexes=c("person_id")) %>% 
     generate_outcome_dataset(outcome_type = "presence",
                              respiratory_tbl = results_tbl(paste0(output_prefix, "respiratory_outcomes")),
                              general_tbl = results_tbl(paste0(output_prefix, "general_outcomes")),
@@ -218,7 +219,7 @@ config_append('extra_packages', c())
   
   iptw_metadata <- cox_format_dataframe %>% 
     add_iptw_weights(estimand = "ATE",
-                     formula_expression = "exposure~ce_days_secular",
+                     formula_expression = "exposure~ce_days_secular + race_eth_cat",
                      output_tbl_name = "co_main_outcome_first_presence_wts")
   
   cox_model_general <- 
@@ -226,6 +227,33 @@ config_append('extra_packages', c())
     collect() %>% 
     perform_cox_model(outcome = "has_postacute_general_outcome",
                       time_until = "days_til_earliest_general_outcome")
+  
+  cox_model_respiratory <- 
+    results_tbl("co_main_outcome_first_presence_wts") %>% 
+    collect() %>% 
+    perform_cox_model(outcome = "has_postacute_respiratory_outcome",
+                      time_until = "days_til_earliest_respiratory_outcome")
+  
+  cox_model_respiratory_unweighted <- 
+    results_tbl("co_main_outcome_first_presence_wts") %>% 
+    collect() %>% 
+    perform_cox_model(outcome = "has_postacute_respiratory_outcome",
+                      time_until = "days_til_earliest_respiratory_outcome",
+                      weighted = FALSE)
+  
+  cox_model_rsv_unweighted <- 
+    results_tbl("co_main_outcome_first_presence_wts") %>% 
+    collect() %>% 
+    perform_cox_model(outcome = "has_postacute_rsv_outcome",
+                      time_until = "days_til_earliest_rsv_outcome",
+                      weighted = FALSE)
+  
+  cox_model_rsv_weighted <- 
+    results_tbl("co_main_outcome_first_presence_wts") %>% 
+    collect() %>% 
+    perform_cox_model(outcome = "has_postacute_rsv_outcome",
+                      time_until = "days_til_earliest_rsv_outcome",
+                      weighted = TRUE)
   
   ## Write some code to abstract and save results of the models, that can then be pulled in by a markdown script
   
