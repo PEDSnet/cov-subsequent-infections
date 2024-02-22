@@ -51,6 +51,32 @@ get_flu_evidence <- function(cohort_tbl, min_date, max_date) {
     return()
 }
 
+get_respiratory_evidence <- function(cohort_tbl, min_date, max_date) {
+  # TODO Use new codeset
+  noncovid_resp_conditions <-
+    load_codeset("dx_noncov_resp_infections") %>% 
+    inner_join(cohort %>% 
+                 select(person_id) %>% 
+                 left_join(cdm_tbl("condition_occurrence") %>% 
+                             select(visit_occurrence_id, condition_occurrence_id, condition_source_concept_id, person_id, site, condition_start_date) %>% 
+                             filter(condition_start_date < max_date, condition_start_date >= min_date),
+                           by="person_id") %>% compute_new(indexes=c("person_id", "condition_source_concept_id")), 
+               by=c("concept_id"="condition_source_concept_id")) %>% 
+    compute_new(indexes=c("person_id")) %>% 
+    group_by(person_id) %>% 
+    slice_min(condition_start_date) %>% 
+    ungroup() %>% 
+    compute_new(indexes=c("person_id"))
+  
+  cohort_tbl %>% 
+    left_join(noncovid_resp_conditions %>% 
+                select(person_id, earliest_resp_evidence = condition_start_date),
+              by="person_id") %>% 
+    return()
+  
+  
+}
+
 
 build_ili_controls <- function(cohort_antijoin) {
   ili_codes <-

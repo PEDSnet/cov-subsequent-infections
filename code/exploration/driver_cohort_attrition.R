@@ -14,27 +14,27 @@ odr <- cdm_tbl("observation_derivation_recover") %>%
 
 ## TODO can now delete, this is obsolete
 
-generate_output_unfiltered_cohort <- function(ce_start_date, ce_end_date, cohort_label, odr) {
-  eligible_pats <-
-    cdm_tbl("person") %>% 
-    get_patients_under_age_limit(cdm_tbl("visit_occurrence"), ce_start_date, ce_end_date, age_limit_years_rough = 6) %>% 
-    identify_cohort_group(odr_tbl = odr, ce_start_date = ce_start_date, ce_end_date = ce_end_date) %>% 
-    compute_new(indexes=c("person_id")) %>% 
-    mutate(age_at_ce_under_limit = ifelse(age_years_on_ce_date < 5, 1, 0)) %>% 
-    mutate(index_date = ce_date) %>% 
-    flag_visits_prior(cdm_tbl("visit_occurrence"), n_years = 1.5) %>% 
-    flag_visit_follow_up(cdm_tbl("visit_occurrence")) %>% 
-    select(-index_date) %>% 
-    compute_new(indexes=c("person_id")) %>% 
-    flag_study_eligiblity(ce_start_date, ce_end_date) %>% 
-    compute_new(indexes=c("person_id"))
-  
-  eligible_pats %>% 
-    output_tbl(paste0("cohort", cohort_label, "unfiltered"), indexes=c("person_id"))
-  
-  eligible_pats %>% 
-    return()
-}
+# generate_output_unfiltered_cohort <- function(ce_start_date, ce_end_date, cohort_label, odr) {
+#   eligible_pats <-
+#     cdm_tbl("person") %>% 
+#     get_patients_under_age_limit(cdm_tbl("visit_occurrence"), ce_start_date, ce_end_date, age_limit_years_rough = 6) %>% 
+#     build_comparison_cohorts_rsv_study(odr_tbl = odr, ce_start_date = ce_start_date, ce_end_date = ce_end_date) %>% 
+#     compute_new(indexes=c("person_id")) %>% 
+#     mutate(age_at_ce_under_limit = ifelse(age_years_on_ce_date < 5, 1, 0)) %>% 
+#     mutate(index_date = ce_date) %>% 
+#     flag_visits_prior(cdm_tbl("visit_occurrence"), n_years = 1.5) %>% 
+#     flag_visit_follow_up(cdm_tbl("visit_occurrence")) %>% 
+#     select(-index_date) %>% 
+#     compute_new(indexes=c("person_id")) %>% 
+#     flag_study_eligiblity(ce_start_date, ce_end_date) %>% 
+#     compute_new(indexes=c("person_id"))
+#   
+#   eligible_pats %>% 
+#     output_tbl(paste0("cohort", cohort_label, "unfiltered"), indexes=c("person_id"))
+#   
+#   eligible_pats %>% 
+#     return()
+# }
 
 generate_output_cohort_demo <- function(ce_start_date, ce_end_date, cohort_tbl_name, cohort_output_tbl_name) {
   eligible_pats_demo <-

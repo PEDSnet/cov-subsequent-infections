@@ -153,4 +153,23 @@ ssti_strings <- vocabulary_tbl('concept') %>%
   get_descendants() %>% 
   compute_new()
 
+
+#### Modifying existing codesets
+rsv_codeset_with_sr_edits <- load_codeset("lab_rsv")
+
+filtered_lab_rsv <- rsv_codeset_with_sr_edits %>% 
+  filter(is.na(exclude) | exclude != "x") 
+
+filtered_lab_rsv %>% 
+  select(concept_id, concept_name, concept_code, vocabulary_id) %>% 
+  write.csv('specs/lab_rsv_final.csv', row.names = FALSE)
+
+## Updates: don't use dx_influenza, now just use resp codes filtered down.
+## Use lab_rsv_final for RSV outcome codes
+## use resp codes filtered down to the RSV codes for rsv
+
+## now we have covid, influenza, and all other resp cohort (non-influenza and non-rsv)
+## and then we have rsv dx's and labs as outcomes
+
+
   

@@ -9,6 +9,21 @@
 #' requests, it may be more readable to separate different cohorts or
 #' operations on cohorts into logical groups in different files.
 #'
+#'
+apply_inclusion_flags_rsv_study <- function(cohort_tbl, ce_start_date, ce_end_date, cohort_label) {
+  eligible_pats <-
+    cohort_tbl %>% 
+    mutate(index_date = ce_date) %>% 
+    flag_visits_prior(cdm_tbl("visit_occurrence"), n_years = 1.5) %>% 
+    flag_visit_follow_up(cdm_tbl("visit_occurrence")) %>% 
+    select(-index_date) %>% 
+    compute_new(indexes=c("person_id")) %>% 
+    flag_study_eligiblity(ce_start_date, ce_end_date) %>% 
+    compute_new(indexes=c("person_id"))
+  
+  eligible_pats %>% 
+    return()
+}
 
 get_patients_under_age_limit <- function(person_tbl, visit_tbl, ce_start_date, ce_end_date, age_limit_years_rough) {
   # Gets all patients under 6 during the whole study entry period
@@ -28,19 +43,12 @@ get_patients_under_age_limit <- function(person_tbl, visit_tbl, ce_start_date, c
 }
 
 get_influenza_evidence <- function(cohort_tbl, ce_start_date, ce_end_date) {
-  # flu_dates <- cohort_tbl %>% 
-  #   mutate(flu_date = case_when(person_id %% 5 == 0 ~ as.Date(visit_start_date + days(11)),
-  #                               person_id %% 3 == 0 ~ as.Date(visit_start_date + days(17)),
-  #                               TRUE ~ NA))# arbitrary random index date in place of
-  # 
-  # flu_dates %>% 
-  #   return()
   ## Return the cohort with a flu evidence within the study period
   ## columns: person_id, flu_date
   
   influenza_positives <-
     cohort_tbl %>%
-    get_flu_evidence(min_date = ce_start_date, max_date = ce_end_date)
+    get_flu_evidence(min_date = as.Date(ce_start_date - months(12)), max_date = as.Date(ce_end_date + months(6)))
   
   cohort_tbl %>% 
     left_join(influenza_positives %>% 
@@ -51,21 +59,31 @@ get_influenza_evidence <- function(cohort_tbl, ce_start_date, ce_end_date) {
                        ),
               by="person_id") %>% 
     return()
-  ## TODO finish return type here 
 }
 
-get_covid_evidence <- function(cohort_tbl, odr_tbl) {
-  # covid_dates <- cohort_tbl %>% 
-  #   mutate(covid_date = case_when(person_id %% 7 == 0 ~ as.Date(visit_start_date + days(11)),
-  #                               person_id %% 4 == 0 ~ as.Date(visit_start_date + days(3)),
-  #                               person_id %% 13 == 0 ~ as.Date(visit_start_date + days(18)),
-  #                               TRUE ~ NA))# arbitrary random index date in place of
-  # 
-  ## Return the cohort with a covid evidence within the study period
-  ## columns: person_id, covid_date
+get_other_resp_evidence <- function(cohort_tbl, ce_start_date, ce_end_date) {
+  
+  respiratory_positives <-
+    cohort_tbl %>%
+    get_respiratory_evidence(min_date = as.Date(ce_start_date - months(12)), max_date = as.Date(ce_end_date + months(6)))
+  
+  cohort_tbl %>% 
+    left_join(respiratory_positives %>% 
+                select(person_id, 
+                       resp_date = earliest_resp_evidence
+                ),
+              by="person_id") %>% 
+    return()
+}
+
+get_covid_evidence <- function(cohort_tbl, odr_tbl, ce_start_date, ce_end_date) {
+  ## First, filter ODR table to the max post-acute and pre-acute period as necessary for the exclusion criteria 
+  odr_padded <- odr_tbl %>% 
+    filter(observation_date >= as.Date(ce_start_date - months(12)), observation_date < as.Date(ce_end_date + months(6)))
+  
   covid_positives <- 
     cohort_tbl %>% 
-    flag_covid_positives(odr_tbl)
+    flag_covid_positives(odr_tbl = odr_padded)
   
   cohort_tbl %>% 
     left_join(covid_positives %>% 
@@ -78,38 +96,98 @@ get_covid_evidence <- function(cohort_tbl, odr_tbl) {
 }
 
 ### This will be the primary use function
-identify_cohort_group <- function(cohort_tbl, odr_tbl, ce_start_date, ce_end_date) {
+build_comparison_cohorts_rsv_study <- function(cohort_tbl, odr_tbl, ce_start_date, ce_end_date) {
   # Logic in here to decide what to do with kids who had both within the study period, or who had one or the other or none
   relevant_infections <-
     cohort_tbl %>% 
-    get_covid_evidence(odr_tbl) %>% 
+    get_covid_evidence(odr_tbl, ce_start_date, ce_end_date) %>% 
     get_influenza_evidence(ce_start_date, ce_end_date) %>% 
+    get_other_resp_evidence(ce_start_date, ce_end_date) %>% ## shouldn't there be data here on pre- and post- cohort entry period infections?
     compute_new(indexes=c("person_id"))
   
+  ## Then relevant infections should have the earliest infection for each person, in each category of comparison cohort
+  ## Next step, apply exclusion rules
   ## Apply rules:
-  relevant_infections %>% 
-    mutate(cohort_assignment = case_when(
-      is.na(covid_date) & is.na(flu_date) ~ "No infection",
-      is.na(covid_date) & !is.na(flu_date) ~ "Influenza",
-      is.na(flu_date) & !is.na(covid_date) ~ "Covid",
-      !is.na(flu_date) & !is.na(covid_date) & covid_date < flu_date ~ "Covid prior to influenza",
-      !is.na(flu_date) & !is.na(covid_date) & flu_date < covid_date ~ "Influenza prior to covid",
-      !is.na(flu_date) & !is.na(covid_date) & covid_date == flu_date ~ "Covid and influenza same day",
-      TRUE ~ "Undiscernable"
+  ## If one of the other categories has happened 12-6 months before index period, count as variable
+  ## IF one of the other categories has happened within 6 months of index, exclude
+  ## If one of the other categories has happened within 6 months following index, exclude
+  ## If other category is after post-acute period, ok
+  ## new columns: comparison_cohort, prior_infection_type, exclude (1/0), exclude_reason
+  ## classify phases instead (will make logic easier later)
+  relevant_infections <- data.frame(person_id = c("a", "b", "c", "d", "e", "f"), 
+                                    covid_date = c(as.Date("2022-04-01"), as.Date("2022-04-05"), NA, as.Date("2021-09-01"), as.Date("2022-04-01"), NA), 
+                                    resp_date = c(as.Date("2022-06-01"), NA, as.Date("2022-07-01"), as.Date("2022-03-02"), as.Date("2022-04-01"), NA), 
+                                    flu_date = c(as.Date("2024-01-01"), as.Date("2022-08-01"), NA, NA, NA, NA),
+                                    birth_date = c(as.Date("2018-03-01"), as.Date("2009-01-01"), as.Date("2015-01-01"),as.Date("2016-01-01"),as.Date("2008-01-01"),as.Date("2021-01-01")))
+  
+  infections_phases_categorized <-
+    relevant_infections %>% 
+    pivot_longer(cols = c("covid_date", "flu_date", "resp_date"), names_to = "event", values_to = "event_date") %>% 
+    mutate(event_in_ce_window = ifelse(event_date >= ce_start_date & event_date < ce_end_date, 1, 0)) #%>% 
+    # compute_new(indexes=c("person_id"))
+  
+  ## Now need to identify the earliest index event in the window
+  ## Anyone with NO evidence of all 3 will be removed during this step because they have no minimum
+  earliest_index_event <-
+    infections_phases_categorized %>% 
+    filter(event_in_ce_window == 1) %>% 
+    group_by(person_id) %>% 
+    slice_min(event_date, with_ties = FALSE) %>% 
+    ungroup() %>% 
+    select(person_id, ce_date = event_date, ce_event = event) #%>% 
+    # compute_new(indexes=c("person_id"))
+    
+  infections_phases_relative <-
+    earliest_index_event %>% 
+    left_join(relevant_infections, by="person_id") %>% 
+    mutate(covid_phase = case_when(
+      is.na(covid_date) ~ "none",
+      ce_event == "covid_date" ~ "index",
+      covid_date < as.Date(ce_date - months(6)) ~ "prior",
+      covid_date < ce_date ~ "pre-acute",
+      covid_date < as.Date(ce_date + months(1)) ~ "acute",
+      covid_date < as.Date(ce_date + months(6)) ~ "post-acute",
+      covid_date >= as.Date(ce_date + months(6)) ~ "future"
     )) %>% 
-    mutate(ce_date = case_when(
-      cohort_assignment == "No infection" ~ visit_start_date, # later make random, could also pick visit as random from the start
-      cohort_assignment == "Influenza" ~ flu_date,
-      cohort_assignment == "Covid" ~ covid_date,
-      cohort_assignment == "Covid prior to influenza" ~ covid_date,
-      cohort_assignment == "Influenza prior to covid" ~ flu_date,
-      cohort_assignment == "Covid and influenza same day" ~ covid_date,
-      TRUE ~ NA
+    mutate(flu_phase = case_when(
+      is.na(flu_date) ~ "none",
+      ce_event == "flu_date" ~ "index",
+      flu_date < as.Date(ce_date - months(6)) ~ "prior",
+      flu_date < ce_date ~ "pre-acute",
+      flu_date < as.Date(ce_date + months(1)) ~ "acute",
+      flu_date < as.Date(ce_date + months(6)) ~ "post-acute",
+      flu_date >= as.Date(ce_date + months(6)) ~ "future"
     )) %>% 
-    select(-visit_start_date) %>% 
+    mutate(resp_phase = case_when(
+      is.na(resp_date) ~ "none",
+      ce_event == "resp_date" ~ "index",
+      resp_date < as.Date(ce_date - months(6)) ~ "prior",
+      resp_date < ce_date ~ "pre-acute",
+      resp_date < as.Date(ce_date + months(1)) ~ "acute",
+      resp_date < as.Date(ce_date + months(6)) ~ "post-acute",
+      resp_date >= as.Date(ce_date + months(6)) ~ "future"
+    )) 
+  
+  exclude_reasons <-
+    infections_phases_relative %>% 
+    mutate(exclude = case_when(
+      covid_phase %in% c("pre-acute", "acute", "post-acute") |
+        flu_phase %in% c("pre-acute", "acute", "post-acute") |
+        resp_phase %in% c("pre-acute", "acute", "post-acute") ~ 1,
+      TRUE ~ 0
+    )) %>% 
+    mutate(exclude_reason = case_when(
+      exclude == 0 ~ "none",
+      TRUE ~ paste0("Had COVID: ", covid_phase, ", FLU: ", flu_phase, ", RESP: ", resp_phase)
+    ))
+  
+  exclude_reasons %>% 
+    mutate(sub_cohort = case_when(
+      ce_event == "covid_date" ~ "COVID",
+      ce_event == "flu_date" ~ "Influenza",
+      ce_event == "resp_date" ~ "Respiratory")) %>% 
     mutate(age_years_on_ce_date = as.numeric(ce_date-birth_date)/365.25) %>% 
     return()
-  
   
 }
 
@@ -263,27 +341,6 @@ apply_washout_logic <- function(cohort, odr) {
     return()
 }
 
-generate_output_unfiltered_cohort <- function(ce_start_date, ce_end_date, cohort_label, odr) {
-  eligible_pats <-
-    cdm_tbl("person") %>% 
-    get_patients_under_age_limit(cdm_tbl("visit_occurrence"), ce_start_date, ce_end_date, age_limit_years_rough = 6) %>% 
-    identify_cohort_group(odr_tbl = odr, ce_start_date = ce_start_date, ce_end_date = ce_end_date) %>% 
-    compute_new(indexes=c("person_id")) %>% 
-    mutate(age_at_ce_under_limit = ifelse(age_years_on_ce_date < 5, 1, 0)) %>% 
-    mutate(index_date = ce_date) %>% 
-    flag_visits_prior(cdm_tbl("visit_occurrence"), n_years = 1.5) %>% 
-    flag_visit_follow_up(cdm_tbl("visit_occurrence")) %>% 
-    select(-index_date) %>% 
-    compute_new(indexes=c("person_id")) %>% 
-    flag_study_eligiblity(ce_start_date, ce_end_date) %>% 
-    compute_new(indexes=c("person_id"))
-  
-  eligible_pats %>% 
-    output_tbl(paste0("cohort", cohort_label, "unfiltered"), indexes=c("person_id"))
-  
-  eligible_pats %>% 
-    return()
-}
 
 generate_output_cohort_demo <- function(ce_start_date, ce_end_date, cohort_tbl_name, cohort_output_tbl_name) {
   eligible_pats_demo <-
