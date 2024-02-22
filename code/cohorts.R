@@ -581,11 +581,12 @@ generate_outcome_dataset <- function(cohort,
 get_insurance_class <- function(cohort) {
   insurance_plans <- cohort %>% 
     left_join(cdm_tbl("visit_occurrence") %>% 
-                select(visit_occurrence_id, person_id, visit_start_date), by=c("person_id", "ce_date"="visit_start_date")) %>% 
+                select(visit_occurrence_id, person_id, visit_start_date), by=c("person_id", "ce_date"="visit_start_date")) %>%
+    compute_new() %>% 
     left_join(cdm_tbl("visit_payer") %>% 
                 select(visit_occurrence_id, plan_class), by="visit_occurrence_id") %>% 
-    group_by(person_id, plan_class, ce_date) %>% 
-    filter(row_number()==1) %>% 
+    mutate(earliest_date = ce_date) %>% 
+    distinct(person_id, plan_class, earliest_date) %>% 
     ungroup() %>% 
     compute_new()
   
