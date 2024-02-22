@@ -71,7 +71,7 @@ flag_outcome_resp_infections <- function(cohort, outcome_start_date, outcome_end
 flag_rsv_outcome <- function(cohort, outcome_start_date, outcome_end_date) {
   
   rsv_conditions <-
-    load_codeset("dx_rsv_draft") %>% 
+    load_codeset("dx_rsv_final") %>% 
     left_join(cohort %>% 
                 select(person_id) %>% 
                 left_join(cdm_tbl("condition_occurrence") %>% 
@@ -82,7 +82,7 @@ flag_rsv_outcome <- function(cohort, outcome_start_date, outcome_end_date) {
     compute_new(indexes=c("person_id"))
   
   rsv_tests <- 
-    load_codeset("lab_rsv") %>% 
+    load_codeset("lab_rsv_final") %>% 
     left_join(cohort %>% select(person_id) %>% 
                 left_join(cdm_tbl("measurement_labs") %>% 
                             select(measurement_concept_id, person_id, site, measurement_date, value_as_concept_id) %>% 

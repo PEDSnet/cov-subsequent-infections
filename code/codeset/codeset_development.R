@@ -131,27 +131,27 @@ rsv_dx %>%
   select(concept_id, concept_name, concept_code, vocabulary_id) %>% 
   write.csv('specs/dx_rsv_draft.csv', row.names = FALSE)
 
-## Lab MSK
-lab_rsv_strings <- vocabulary_tbl('concept') %>% 
-  filter(str_detect(tolower(concept_name), 'rsv') |
-           str_detect(tolower(concept_name), 'respiratory syncytial virus')) %>% 
-  filter(vocabulary_id %in% c("LOINC")) %>% 
-  compute_new(indexes=c("concept_id")) %>% 
-  get_descendants() %>% 
-  compute_new()
-
-lab_rsv_strings %>% 
-  select(concept_id, concept_name, concept_code, vocabulary_id) %>% 
-  write.csv('specs/lab_rsv.csv', row.names = FALSE)
-
-## Lab SSTI
-ssti_strings <- vocabulary_tbl('concept') %>% 
-  filter(str_detect(tolower(concept_name), 'skin') |
-           str_detect(tolower(concept_name), 'soft tissue')) %>% 
-  filter(vocabulary_id %in% c("LOINC")) %>% 
-  compute_new(indexes=c("concept_id")) %>% 
-  get_descendants() %>% 
-  compute_new()
+# ## Lab MSK
+# lab_rsv_strings <- vocabulary_tbl('concept') %>% 
+#   filter(str_detect(tolower(concept_name), 'rsv') |
+#            str_detect(tolower(concept_name), 'respiratory syncytial virus')) %>% 
+#   filter(vocabulary_id %in% c("LOINC")) %>% 
+#   compute_new(indexes=c("concept_id")) %>% 
+#   get_descendants() %>% 
+#   compute_new()
+# 
+# lab_rsv_strings %>% 
+#   select(concept_id, concept_name, concept_code, vocabulary_id) %>% 
+#   write.csv('specs/lab_rsv.csv', row.names = FALSE)
+# 
+# ## Lab SSTI
+# ssti_strings <- vocabulary_tbl('concept') %>% 
+#   filter(str_detect(tolower(concept_name), 'skin') |
+#            str_detect(tolower(concept_name), 'soft tissue')) %>% 
+#   filter(vocabulary_id %in% c("LOINC")) %>% 
+#   compute_new(indexes=c("concept_id")) %>% 
+#   get_descendants() %>% 
+#   compute_new()
 
 
 #### Modifying existing codesets
@@ -170,6 +170,28 @@ filtered_lab_rsv %>%
 
 ## now we have covid, influenza, and all other resp cohort (non-influenza and non-rsv)
 ## and then we have rsv dx's and labs as outcomes
+
+load_codeset("dx_noncov_resp_infections") %>% 
+  filter(influenza_related == "x") %>% 
+  select(concept_id, concept_name, concept_code, vocabulary_id) %>% 
+  write.csv('specs/dx_influenza_final.csv', row.names = FALSE)
+
+load_codeset("dx_noncov_resp_infections") %>% 
+  filter(rsv_related == "x") %>% 
+  select(concept_id, concept_name, concept_code, vocabulary_id) %>% 
+  write.csv('specs/dx_rsv_final.csv', row.names = FALSE)
+
+load_codeset("dx_noncov_resp_infections") %>% 
+  filter(is.na(rsv_related), is.na(influenza_related)) %>% 
+  select(concept_id, concept_name, concept_code, vocabulary_id) %>% 
+  write.csv('specs/dx_other_resp_final.csv', row.names = FALSE)
+
+### FINAL CODESETS
+## dx_other_resp_final
+## dx_rsv_final
+## dx_influenza_final
+## lab_rsv_final
+## lab_influenza_filtered
 
 
   
