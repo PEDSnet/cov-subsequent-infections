@@ -478,6 +478,11 @@ plot_rollup_summary <- function(rolled_up_dx_tbl,
     mutate(person_event = paste0(person_id, "_", event)) %>% 
     # ungroup() %>% 
     ggplot() +
+    geom_vline(xintercept = -365, linetype="dashed", color="grey") +
+    geom_vline(xintercept = -182.5, linetype="dashed", color="grey") +
+    geom_vline(xintercept = 30, linetype="dashed", color="orange") +
+    geom_vline(xintercept = 180, linetype="dashed", color="orange") +
+    geom_vline(xintercept = 0, linetype="solid", size=0.5) +
     geom_line(aes(x=days_from_ce, y = viz_id, group=person_event),
               linewidth = 1, alpha = 0.9) +
     geom_line(aes(x=days_from_ce, y = viz_id, group=viz_id),

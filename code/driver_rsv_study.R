@@ -175,13 +175,6 @@ config_append('extra_packages', c())
   
   ## Output final datasets at end, see next driver for modeling and/or reporting analytics!
   
-  
-  # By convention, accumulate execution results in a list rather than as
-  # independent variables, in order to make returning the entire set easier
-  rslt <- list()
-  
-  
-  
 
   
   message('Done.')
