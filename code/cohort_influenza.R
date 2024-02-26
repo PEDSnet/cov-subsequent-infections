@@ -10,7 +10,7 @@
 #' @examples
 #' my_flu_cohort <- get_flu_evidence(as.Date("2019-01-01"), as.Date("2020-01-01))
 #' 
-get_flu_evidence <- function(cohort_tbl, min_date, max_date) {
+get_flu_evidence <- function(cohort_tbl, min_date, max_date, test_only = FALSE) {
   
   flu_conditions <-
     load_codeset("dx_influenza_final") %>% 
@@ -30,25 +30,38 @@ get_flu_evidence <- function(cohort_tbl, min_date, max_date) {
               by=c("concept_id"="measurement_concept_id")) %>% 
     compute_new(indexes=c("person_id"))
   
-  # Should be a full join
-  flu_tests %>% 
-    filter(value_as_concept_id == 9191) %>% 
-    group_by(person_id) %>% # This part just gets the patient's earliest flu evidence, but instead, could just mark a new column as "first" that could later be filtered
-    slice_min(measurement_date, with_ties = FALSE) %>% 
-    ungroup() %>% 
-    select(person_id, earliest_flu_test = measurement_date) %>% 
-    compute_new(indexes=c("person_id")) %>% 
-    full_join(flu_conditions %>% 
-                group_by(person_id) %>% 
-                slice_min(condition_start_date, with_ties = FALSE) %>% # Same here, instead of slicing the min, could just identify the min
-                ungroup() %>% 
-                select(person_id, flu_dx_date = condition_start_date) %>% 
-                compute_new(indexes=c("person_id")), by=c("person_id")) %>% 
-    mutate(earliest_flu_evidence = case_when(is.na(earliest_flu_test) ~ flu_dx_date,
-                                             is.na(flu_dx_date) ~ earliest_flu_test,
-                                             flu_dx_date <= earliest_flu_test ~ flu_dx_date,
-                                             earliest_flu_test < flu_dx_date ~ earliest_flu_test)) %>% 
-    return()
+  if (test_only == TRUE) {
+    flu_tests %>% 
+      filter(value_as_concept_id == 9191) %>% 
+      group_by(person_id) %>% # This part just gets the patient's earliest flu evidence, but instead, could just mark a new column as "first" that could later be filtered
+      slice_min(measurement_date, with_ties = FALSE) %>% 
+      ungroup() %>% 
+      select(person_id, earliest_flu_test = measurement_date) %>% 
+      compute_new(indexes=c("person_id")) %>% 
+      mutate(earliest_flu_evidence = earliest_flu_test) %>% 
+      return()
+  } else{
+    flu_tests %>% 
+      filter(value_as_concept_id == 9191) %>% 
+      group_by(person_id) %>% # This part just gets the patient's earliest flu evidence, but instead, could just mark a new column as "first" that could later be filtered
+      slice_min(measurement_date, with_ties = FALSE) %>% 
+      ungroup() %>% 
+      select(person_id, earliest_flu_test = measurement_date) %>% 
+      compute_new(indexes=c("person_id")) %>% 
+      full_join(flu_conditions %>% 
+                  group_by(person_id) %>% 
+                  slice_min(condition_start_date, with_ties = FALSE) %>% # Same here, instead of slicing the min, could just identify the min
+                  ungroup() %>% 
+                  select(person_id, flu_dx_date = condition_start_date) %>% 
+                  compute_new(indexes=c("person_id")), by=c("person_id")) %>% 
+      mutate(earliest_flu_evidence = case_when(is.na(earliest_flu_test) ~ flu_dx_date,
+                                               is.na(flu_dx_date) ~ earliest_flu_test,
+                                               flu_dx_date <= earliest_flu_test ~ flu_dx_date,
+                                               earliest_flu_test < flu_dx_date ~ earliest_flu_test)) %>% 
+      return()
+  }
+  
+
 }
 
 get_respiratory_evidence <- function(cohort_tbl, min_date, max_date) {

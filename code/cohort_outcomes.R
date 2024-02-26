@@ -68,7 +68,7 @@ flag_outcome_resp_infections <- function(cohort, outcome_start_date, outcome_end
 #' @export
 #'
 #' @examples
-flag_rsv_outcome <- function(cohort, outcome_start_date, outcome_end_date) {
+flag_rsv_outcome <- function(cohort, outcome_start_date, outcome_end_date, test_only = FALSE) {
   
   rsv_conditions <-
     load_codeset("dx_rsv_final") %>% 
@@ -91,28 +91,46 @@ flag_rsv_outcome <- function(cohort, outcome_start_date, outcome_end_date) {
               by=c("concept_id"="measurement_concept_id")) %>% 
     compute_new(indexes=c("person_id"))
   
-  # Should be a full join
-  rsv_tests %>% 
-    filter(value_as_concept_id == 9191) %>% 
-    # group_by(person_id) %>% 
-    # slice_min(measurement_date, with_ties = FALSE) %>% 
-    # ungroup() %>% 
-    select(person_id, rsv_test_date = measurement_date) %>% 
-    compute_new(indexes=c("person_id")) %>% 
-    full_join(rsv_conditions %>% 
-                # group_by(person_id) %>% 
-                # # slice_min(condition_start_date, with_ties = FALSE) %>% # Same here, instead of slicing the min, could just identify the min
-                # ungroup() %>% 
-                select(person_id, rsv_dx_date = condition_start_date) %>% 
-                compute_new(indexes=c("person_id")), by=c("person_id")) %>% 
-    mutate(rsv_evidence_date = case_when(is.na(rsv_test_date) ~ rsv_dx_date,
-                                             is.na(rsv_dx_date) ~ rsv_test_date,
-                                             rsv_dx_date <= rsv_test_date ~ rsv_dx_date,
-                                             rsv_test_date < rsv_dx_date ~ rsv_test_date)) %>% 
-    select(person_id, rsv_evidence_date) %>% 
-    group_by(person_id, rsv_evidence_date) %>% 
-    filter(row_number()==1) %>% 
-    ungroup() %>% 
-    return()
+  if (test_only == TRUE) {
+    rsv_tests %>% 
+      filter(value_as_concept_id == 9191) %>% 
+      # group_by(person_id) %>% 
+      # slice_min(measurement_date, with_ties = FALSE) %>% 
+      # ungroup() %>% 
+      select(person_id, rsv_test_date = measurement_date) %>% 
+      compute_new(indexes=c("person_id")) %>% 
+      mutate(rsv_evidence_date = rsv_test_date) %>% 
+      select(person_id, rsv_evidence_date) %>% 
+      group_by(person_id, rsv_evidence_date) %>% 
+      filter(row_number()==1) %>% 
+      ungroup() %>% 
+      return()
+  } else {
+    
+    # Should be a full join
+    rsv_tests %>% 
+      filter(value_as_concept_id == 9191) %>% 
+      # group_by(person_id) %>% 
+      # slice_min(measurement_date, with_ties = FALSE) %>% 
+      # ungroup() %>% 
+      select(person_id, rsv_test_date = measurement_date) %>% 
+      compute_new(indexes=c("person_id")) %>% 
+      full_join(rsv_conditions %>% 
+                  # group_by(person_id) %>% 
+                  # # slice_min(condition_start_date, with_ties = FALSE) %>% # Same here, instead of slicing the min, could just identify the min
+                  # ungroup() %>% 
+                  select(person_id, rsv_dx_date = condition_start_date) %>% 
+                  compute_new(indexes=c("person_id")), by=c("person_id")) %>% 
+      mutate(rsv_evidence_date = case_when(is.na(rsv_test_date) ~ rsv_dx_date,
+                                           is.na(rsv_dx_date) ~ rsv_test_date,
+                                           rsv_dx_date <= rsv_test_date ~ rsv_dx_date,
+                                           rsv_test_date < rsv_dx_date ~ rsv_test_date)) %>% 
+      select(person_id, rsv_evidence_date) %>% 
+      group_by(person_id, rsv_evidence_date) %>% 
+      filter(row_number()==1) %>% 
+      ungroup() %>% 
+      return()
+  }
+
 }
 

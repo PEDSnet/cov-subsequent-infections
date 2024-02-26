@@ -11,6 +11,19 @@ flag_covid_positives <- function(cohort, odr_tbl) {
     return()
 }
 
+flag_covid_positives_test_only <- function(cohort, odr_tbl) {
+  cohort %>% 
+    flag_positive_sars_cov2_test(odr_tbl) %>% 
+    # flag_code_u099(odr_tbl) %>%
+    # flag_prescription_pax_des(odr_tbl) %>% # add scrip_rx_date if applying
+    # flag_code_u07_one_or_more(odr_tbl) %>%
+    # flag_serology(odr_tbl) %>% 
+    # mutate(earliest_cov_event_date = pmin(test_date, covid_dx_date, pasc_dx_date)) %>% 
+    # impute_pasc_orphans() %>% 
+    mutate(covid_event_positive = ifelse(!is.na(test_date), 1, 0)) %>% 
+    return()
+}
+
 flag_positive_sars_cov2_test <- function(cohort, odr_tbl) {
   # Logic to add a flag if a patient has a positive sars cov 2 test
   # Just grabbing earliest covid test date, per person_id
