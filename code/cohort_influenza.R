@@ -36,7 +36,9 @@ get_flu_evidence <- function(cohort_tbl, min_date, max_date, test_only = FALSE) 
       group_by(person_id) %>% # This part just gets the patient's earliest flu evidence, but instead, could just mark a new column as "first" that could later be filtered
       slice_min(measurement_date, with_ties = FALSE) %>% 
       ungroup() %>% 
-      select(person_id, earliest_flu_test = measurement_date) %>% 
+      select(person_id, earliest_flu_test = measurement_date,
+             flu_lab_concept_id = concept_id,
+             flu_value_concept_id = value_as_concept_id) %>% 
       compute_new(indexes=c("person_id")) %>% 
       mutate(earliest_flu_evidence = earliest_flu_test) %>% 
       return()

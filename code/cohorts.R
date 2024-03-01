@@ -73,7 +73,9 @@ get_influenza_evidence_test_only <- function(cohort_tbl, ce_start_date, ce_end_d
     left_join(influenza_positives %>% 
                 select(person_id, 
                        flu_date = earliest_flu_evidence,
-                       earliest_flu_test
+                       earliest_flu_test,
+                       flu_lab_concept_id,
+                       flu_value_concept_id
                 ),
               by="person_id") %>% 
     return()
@@ -92,7 +94,8 @@ get_other_resp_evidence <- function(cohort_tbl, ce_start_date, ce_end_date) {
     left_join(respiratory_positives %>% 
                 select(person_id, 
                        resp_date = condition_start_date,
-                       resp_concept = concept_name
+                       resp_concept = concept_name,
+                       resp_concept_id = concept_id
                 ),
               by="person_id") %>% 
     return()
@@ -132,12 +135,15 @@ get_covid_evidence_test_only <- function(cohort_tbl, odr_tbl, ce_start_date, ce_
   
   covid_positives <- 
     cohort_tbl %>% 
-    flag_covid_positives_test_only(odr_tbl = odr_padded)
+    flag_covid_positives_test_only(odr_tbl = odr_padded) %>% 
+    mutate(covid_obs_concept_id = observation_concept_id, covid_value_concept_id = value_as_concept_id)
   
   cohort_tbl %>% 
     left_join(covid_positives %>% 
                 select(person_id,
-                       covid_date = test_date),
+                       covid_date = test_date,
+                       covid_obs_concept_id,
+                       covid_value_concept_id),
               by="person_id") %>% 
     return()
   

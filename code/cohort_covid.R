@@ -21,6 +21,7 @@ flag_covid_positives_test_only <- function(cohort, odr_tbl) {
     # mutate(earliest_cov_event_date = pmin(test_date, covid_dx_date, pasc_dx_date)) %>% 
     # impute_pasc_orphans() %>% 
     mutate(covid_event_positive = ifelse(!is.na(test_date), 1, 0)) %>% 
+    compute_new() %>% 
     return()
 }
 
@@ -30,13 +31,14 @@ flag_positive_sars_cov2_test <- function(cohort, odr_tbl) {
   
   pos_test_cohort <- odr_tbl %>% 
     filter(observation_concept_id %in% c(2000001530, 2000001529), value_as_concept_id %in% c(9191L, 2000001526)) %>% 
-    select(person_id, test_date = observation_date) %>% 
+    select(person_id, test_date = observation_date, observation_concept_id, value_as_concept_id) %>% 
     group_by(person_id) %>%
     slice_min(test_date, with_ties = FALSE) %>%
     mutate(positive_test_flag = 1) %>% 
     compute_new(indexes=c("person_id"))
   
   cohort %>% 
+    compute_new() %>% 
     left_join(
       pos_test_cohort,
       by=c("person_id")

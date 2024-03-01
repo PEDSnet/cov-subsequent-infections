@@ -97,10 +97,14 @@ flag_rsv_outcome <- function(cohort, outcome_start_date, outcome_end_date, test_
       # group_by(person_id) %>% 
       # slice_min(measurement_date, with_ties = FALSE) %>% 
       # ungroup() %>% 
-      select(person_id, rsv_test_date = measurement_date) %>% 
+      select(person_id, rsv_test_date = measurement_date,
+             rsv_lab_concept_id = measurement_concept_id,
+             rsv_lab_value_concept_id = value_as_concept_id) %>% 
       compute_new(indexes=c("person_id")) %>% 
       mutate(rsv_evidence_date = rsv_test_date) %>% 
-      select(person_id, rsv_evidence_date) %>% 
+      select(person_id, rsv_evidence_date,
+             rsv_lab_concept_id,
+             rsv_lab_value_concept_id) %>% 
       group_by(person_id, rsv_evidence_date) %>% 
       filter(row_number()==1) %>% 
       ungroup() %>% 

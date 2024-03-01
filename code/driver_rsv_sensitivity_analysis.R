@@ -61,11 +61,13 @@ config_append('extra_packages', c())
   
   sample_pats_under_6 %>% output_tbl("pat_sample_02_22")
   
-  rslt$triple_cohort <- rslt$pats_under_age_6 %>% 
+  rslt$triple_cohort_all <- rslt$pats_under_age_6 %>% 
     build_comparison_cohorts_rsv_study_sensitivity(odr_tbl = cdm_tbl("observation_derivation_recover"), # Should probably keep track of the inclusion concept code
                                        ce_start_date = cohort_entry_start_date, 
                                        ce_end_date = cohort_entry_end_date) %>% 
-    compute_new(indexes=c("person_id")) %>% 
+    compute_new(indexes=c("person_id")) 
+  
+  rslt$ triple_cohort <- rslt$triple_cohort_all %>% 
     mutate(age_at_ce_under_limit = ifelse(age_years_on_ce_date < 5, 1, 0)) %>% 
     filter(age_at_ce_under_limit == 1)
   
@@ -170,6 +172,7 @@ config_append('extra_packages', c())
                                   output_tbl_name = paste0(cohort_1_label, "rsv_outcomes"),
                                   test_only = TRUE)
   
+  ## FIRST THING TUESDAY: Run report using the results of the sensitivity analysis, see what the distributions show
   
   ## Step 3
   ## Generate additional covariates

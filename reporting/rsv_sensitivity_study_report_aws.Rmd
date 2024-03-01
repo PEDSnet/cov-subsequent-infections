@@ -1,5 +1,5 @@
 ---
-title: "Subsequent Infections - RSV Study"
+title: "Subsequent Infections - RSV Study Sensitivity Analysis"
 output:
   html_document:
     df_print: paged
@@ -9,6 +9,8 @@ output:
 ---
 
 Report for cohort information and basic RSV outcomes data specific to the RSV outcome study.
+
+**Using TEST ONLY evidence for COVID, Influenza, and RSV, and using diagnoses for respiratory infections**
 
 ```{r include=FALSE}
 # Default taken from R notebook behavior: when knitting, wd will always be location of notebook
@@ -70,8 +72,7 @@ prettify_kable <- function(data, indents = list()) {
   cohort_entry_start_date = as.Date("2022-03-01")
   cohort_entry_end_date = as.Date("2023-01-01")
   
-  cohort_1_label = "_rsv_study_cohort_"
-  # cohort_1_label = "sample_pats"
+  cohort_1_label = "rsv_sensitivity_"
   
   ### Step 1: Analysis of time-to-outcome for RSV outcomes
   
@@ -424,7 +425,6 @@ cohort_with_rsv_outcomes %>%
 ### RSV post-acute infections as a function of cohort entry week
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
-
 
 post_acute_rsv %>% 
   group_by(sub_cohort, rsv_occurrence_period, cohort_entry_week) %>% 
