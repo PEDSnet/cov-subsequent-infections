@@ -106,7 +106,7 @@ get_covid_evidence <- function(cohort_tbl, odr_tbl, ce_start_date, ce_end_date) 
   earliest_date <- as.Date(ce_start_date - months(12))
   latest_date <- as.Date(ce_end_date + months(6))
   odr_padded <- odr_tbl %>% 
-    filter(as.Date(observation_date) >= earliest_date, 
+    filter(as.Date(observation_date) >= as.Date("2020-03-01"), # TODO actually maybe don't padd this, because patients need to be washed out of having any prior covid
            as.Date(observation_date) < latest_date) %>% 
     compute_new()
   
@@ -153,7 +153,7 @@ get_covid_evidence_test_only <- function(cohort_tbl, odr_tbl, ce_start_date, ce_
 build_comparison_cohorts_rsv_study <- function(cohort_tbl, odr_tbl, ce_start_date, ce_end_date) {
   # Logic in here to decide what to do with kids who had both within the study period, or who had one or the other or none
   relevant_infections <-
-    cohort_tbl %>% 
+    sample_pats_under_6 %>% #cohort_tbl %>% 
     get_covid_evidence(odr_tbl, ce_start_date, ce_end_date) %>% 
     get_influenza_evidence(ce_start_date, ce_end_date) %>% 
     get_other_resp_evidence(ce_start_date, ce_end_date) %>% ## shouldn't there be data here on pre- and post- cohort entry period infections?
@@ -178,17 +178,26 @@ build_comparison_cohorts_rsv_study <- function(cohort_tbl, odr_tbl, ce_start_dat
     relevant_infections %>% 
     pivot_longer(cols = c("covid_date", "flu_date", "resp_date"), names_to = "event", values_to = "event_date") %>% 
     mutate(event_in_ce_window = ifelse(event_date >= ce_start_date & event_date < ce_end_date, 1, 0)) %>% 
+    select(person_id, cov_test_date, covid_dx_date, flu_dx_date, earliest_flu_test, event, event_date,
+           event_in_ce_window) %>% 
+    filter(!is.na(event_date)) %>% 
+    mutate(lab_confirmed = case_when(
+      event=="covid_date" & !is.na(cov_test_date) ~ 1,
+      event=="flu_date" & !is.na(earliest_flu_test) ~ 1,
+      TRUE ~ 0
+    )) %>% 
     compute_new(indexes=c("person_id"))
   
   ## Now need to identify the earliest index event in the window
   ## Anyone with NO evidence of all 3 will be removed during this step because they have no minimum
+  ## New step: earliest index date, test confirmed, and earliest index date, any (I guess it's just, what is the earliest thing, and if its test confirmed or not)
   earliest_index_event <-
     infections_phases_categorized %>% 
     filter(event_in_ce_window == 1) %>% 
     group_by(person_id) %>% 
     slice_min(event_date, with_ties = FALSE) %>% 
     ungroup() %>% 
-    select(person_id, ce_date = event_date, ce_event = event) %>%  
+    select(person_id, ce_date = event_date, ce_event = event, lab_confirmed) %>%  
     compute_new(indexes=c("person_id"))
     
   infections_phases_relative <-
@@ -225,14 +234,15 @@ build_comparison_cohorts_rsv_study <- function(cohort_tbl, odr_tbl, ce_start_dat
   exclude_reasons <-
     infections_phases_relative %>% 
     mutate(exclude = case_when(
-      covid_phase %in% c("pre-acute", "acute", "post-acute") |
-        flu_phase %in% c("pre-acute", "acute", "post-acute") |
-        resp_phase %in% c("pre-acute", "acute", "post-acute") ~ 1,
+      covid_phase %in% c("prior","pre-acute", "acute", "post-acute") |
+        flu_phase %in% c("pre-acute", "acute", "post-acute") ~ 1,
+        resp_phase %in% c("pre-acute", "acute", "post-acute") ~ 2, # Changing this to it's ok if someone has a diagnosis of a respiratory condition
       TRUE ~ 0
     )) %>% 
     mutate(exclude_reason = case_when(
+      exclude == 2 ~ "Has respiratory dx within pre-acute, acute, or post-acute period",
       exclude == 0 ~ "none",
-      TRUE ~ paste0("Had COVID: ", covid_phase, ", FLU: ", flu_phase, ", RESP: ", resp_phase)
+      TRUE ~ paste0("Had COVID: ", covid_phase, ", FLU: ", flu_phase)
     ))
   
   exclude_reasons %>% 
@@ -248,6 +258,7 @@ build_comparison_cohorts_rsv_study <- function(cohort_tbl, odr_tbl, ce_start_dat
 
 build_comparison_cohorts_rsv_study_sensitivity <- function(cohort_tbl, odr_tbl, ce_start_date, ce_end_date) {
   # Logic in here to decide what to do with kids who had both within the study period, or who had one or the other or none
+  # TODO change this to be the same function, regular code, with just a flag at the end for test-only or not, so the cohort can actually just be filtered for evidence
   relevant_infections <-
     cohort_tbl %>% 
     get_covid_evidence_test_only(odr_tbl, ce_start_date, ce_end_date) %>% 

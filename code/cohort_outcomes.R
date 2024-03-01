@@ -129,8 +129,12 @@ flag_rsv_outcome <- function(cohort, outcome_start_date, outcome_end_date, test_
                                            is.na(rsv_dx_date) ~ rsv_test_date,
                                            rsv_dx_date <= rsv_test_date ~ rsv_dx_date,
                                            rsv_test_date < rsv_dx_date ~ rsv_test_date)) %>% 
-      select(person_id, rsv_evidence_date) %>% 
-      group_by(person_id, rsv_evidence_date) %>% 
+      mutate(lab_confirmed_rsv = case_when(is.na(rsv_test_date) ~ 0,
+                                           is.na(rsv_dx_date) ~ 1,
+                                           rsv_dx_date <= rsv_test_date ~ 1,
+                                           rsv_test_date < rsv_dx_date ~ 1)) %>% 
+      select(person_id, rsv_evidence_date, lab_confirmed_rsv) %>% 
+      group_by(person_id, rsv_evidence_date, lab_confirmed_rsv) %>% 
       filter(row_number()==1) %>% 
       ungroup() %>% 
       return()

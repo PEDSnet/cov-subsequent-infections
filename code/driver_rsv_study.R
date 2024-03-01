@@ -32,13 +32,14 @@ config_append('extra_packages', c())
   ## Special inclusion/exclusion criteria for overlap in cohorts
   
   ###### Anchor dates for conditions
-  postacute_min_start_date = as.Date("2022-04-01")
-  postacute_max_end_date = as.Date("2023-07-01")
+  postacute_min_start_date = as.Date("2022-02-01")
+  postacute_max_end_date = as.Date("2023-01-01")
   
-  cohort_entry_start_date = as.Date("2022-03-01")
-  cohort_entry_end_date = as.Date("2023-01-01")
+  cohort_entry_start_date = as.Date("2022-01-01") # Changing to go backward
+  cohort_entry_end_date = as.Date("2022-07-01")
 
   cohort_1_label = "_rsv_study_cohort_"
+  cohort_1_label = "sample_pats"
   
   # odr <- cdm_tbl("observation_derivation_recover") %>% # Actually, need observations older than this, in order to get pre-index criteria
   #   filter(observation_date >= ce_start_date,
@@ -55,12 +56,12 @@ config_append('extra_packages', c())
              persons = distinct_ct(rslt$pats_under_age_6))
   
   sample_pats_under_6 <- rslt$pats_under_age_6 %>% 
-    slice_sample(n=500) %>% 
+    slice_sample(n=2000) %>% 
     compute_new(indexes=c("person_id"))
   
-  sample_pats_under_6 %>% output_tbl("pat_sample_02_22")
+  sample_pats_under_6 %>% output_tbl("pat_sample_03_01")
   
-  rslt$triple_cohort <- rslt$pats_under_age_6 %>% 
+  rslt$triple_cohort <- results_tbl("pat_sample_03_01") %>%  # rslt$pats_under_age_6 %>% 
     build_comparison_cohorts_rsv_study(odr_tbl = cdm_tbl("observation_derivation_recover"), # Should probably keep track of the inclusion concept code
                                        ce_start_date = cohort_entry_start_date, 
                                        ce_end_date = cohort_entry_end_date) %>% 
@@ -69,6 +70,7 @@ config_append('extra_packages', c())
     filter(age_at_ce_under_limit == 1)
   
   ## TODO add to attrition step
+  ## TODO can filter by lab_confirmed flag or not
   append_sum(cohort = 'Had at least 1 of COVID, influenza, and/or other respiratory infection event during CE period',
              persons = distinct_ct(rslt$triple_cohort))
   
@@ -103,7 +105,7 @@ config_append('extra_packages', c())
   append_sum(cohort = 'Not excluded due to overlapping index infections',
              persons = distinct_ct(rslt$cohort_inclusion_flags %>% 
                                      filter(study_eligible == 1,
-                                            exclude == 0)))
+                                            exclude != 1)))
   
   ## Attrition table also broken down by category / one table per category / add a column for the step type
   ## TODO output the table that's filtered to study_eligible but still has index based exclusion reasons
@@ -122,7 +124,7 @@ config_append('extra_packages', c())
   
   rslt$other_washout_reasons %>% 
     filter(study_eligible == 1) %>% 
-    filter(exclude == 0) %>% 
+    filter(exclude != 1) %>% 
     group_by(sub_cohort, washout_reason) %>% 
     summarise(n=n_distinct(person_id)) %>% 
     output_tbl(paste0(cohort_1_label, "_washout_reasons"))
@@ -130,7 +132,7 @@ config_append('extra_packages', c())
   ## Final cohort
   rslt$final_cohort <- rslt$other_washout_reasons %>% 
     filter(study_eligible == 1) %>% 
-    filter(exclude == 0) %>% 
+    filter(exclude != 1) %>% 
     filter(washout == 0)
   
   ## Save table with exclusion reasons
@@ -164,8 +166,8 @@ config_append('extra_packages', c())
   ## Generate outcomes
   results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
     generate_output_outcome_lists(outcome = "rsv",
-                                  outcome_start_date = as.Date("2022-04-01"),
-                                  outcome_end_date = as.Date("2023-07-01"),
+                                  outcome_start_date = postacute_min_start_date,
+                                  outcome_end_date = postacute_max_end_date,
                                   output_tbl_name = paste0(cohort_1_label, "rsv_outcomes"))
   
   
