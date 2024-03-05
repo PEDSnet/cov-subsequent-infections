@@ -56,12 +56,12 @@ config_append('extra_packages', c())
              persons = distinct_ct(rslt$pats_under_age_6))
   
   sample_pats_under_6 <- rslt$pats_under_age_6 %>% 
-    slice_sample(n=2000) %>% 
+    slice_sample(n=3000) %>% 
     compute_new(indexes=c("person_id"))
   
-  sample_pats_under_6 %>% output_tbl("pat_sample_03_01")
+  sample_pats_under_6 %>% output_tbl("pat_sample_03_05")
   
-  rslt$triple_cohort <- results_tbl("pat_sample_03_01") %>%  # rslt$pats_under_age_6 %>% 
+  rslt$triple_cohort <- results_tbl("pat_sample_03_05") %>%  # rslt$pats_under_age_6 %>% 
     build_comparison_cohorts_rsv_study(odr_tbl = cdm_tbl("observation_derivation_recover"), # Should probably keep track of the inclusion concept code
                                        ce_start_date = cohort_entry_start_date, 
                                        ce_end_date = cohort_entry_end_date) %>% 
@@ -178,9 +178,11 @@ config_append('extra_packages', c())
   ## Data transformations
   
   
-  ## Output final datasets at end, see next driver for modeling and/or reporting analytics!
-  
-
+  ## Output final analytic dataset at end, see next driver for modeling and/or reporting analytics!
+  ## TODO have this be a running / evolving piece of code that generates the "final analytic dataset" that is ready to be plugged in to different models
+  results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
+    generate_analytic_dataset(rsv_outcomes = results_tbl(paste0(cohort_1_label, "rsv_outcomes")),
+                              output_tbl_name = paste0(cohort_1_label, "_analytic_dataset"))
   
   message('Done.')
   

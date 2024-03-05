@@ -71,7 +71,7 @@ prettify_kable <- function(data, indents = list()) {
   cohort_entry_end_date = as.Date("2023-01-01")
   
   cohort_1_label = "_rsv_study_cohort_"
-  # cohort_1_label = "sample_pats"
+  cohort_1_label = "sample_pats"
   
   ### Step 1: Analysis of time-to-outcome for RSV outcomes
   

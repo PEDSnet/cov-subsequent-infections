@@ -153,7 +153,7 @@ get_covid_evidence_test_only <- function(cohort_tbl, odr_tbl, ce_start_date, ce_
 build_comparison_cohorts_rsv_study <- function(cohort_tbl, odr_tbl, ce_start_date, ce_end_date) {
   # Logic in here to decide what to do with kids who had both within the study period, or who had one or the other or none
   relevant_infections <-
-    sample_pats_under_6 %>% #cohort_tbl %>% 
+    cohort_tbl %>% 
     get_covid_evidence(odr_tbl, ce_start_date, ce_end_date) %>% 
     get_influenza_evidence(ce_start_date, ce_end_date) %>% 
     get_other_resp_evidence(ce_start_date, ce_end_date) %>% ## shouldn't there be data here on pre- and post- cohort entry period infections?
@@ -231,12 +231,43 @@ build_comparison_cohorts_rsv_study <- function(cohort_tbl, odr_tbl, ce_start_dat
       resp_date >= as.Date(ce_date + months(6)) ~ "future"
     )) 
   
-  exclude_reasons <-
+  # TODO now also need to update lab_confirmed status or not
+  cohort_entry_corrections <-
     infections_phases_relative %>% 
+    mutate(new_ce_event = case_when(
+      ce_event == "resp_date" & 
+        !is.na(covid_date) & 
+        covid_phase=="acute" & 
+        as.numeric(covid_date-ce_date) <= 7 ~ "covid_date",
+      ce_event == "resp_date" & 
+        !is.na(flu_date) & 
+        flu_phase=="acute" & 
+        as.numeric(flu_date-ce_date) <= 7 ~ "flu_date",
+      TRUE ~ ce_event
+    )) %>% 
+    mutate(new_ce_date = case_when(
+      new_ce_event != ce_event & new_ce_event == "covid_date" ~ covid_date,
+      new_ce_event != ce_event & new_ce_event == "flu_date" ~ flu_date,
+      TRUE ~ ce_date
+    )) %>% 
+    mutate(lab_confirmed = case_when(
+      new_ce_event != ce_event & new_ce_event == "covid_date" & !is.na(cov_test_date) ~ 1,
+      new_ce_event != ce_event & new_ce_event == "flu_date" & !is.na(earliest_flu_test) ~ 1,
+      TRUE ~ lab_confirmed
+    )) %>% 
+    mutate(original_ce_event = ce_event, original_ce_date = ce_date) %>% 
+    mutate(ce_event = new_ce_event, ce_date = new_ce_date) %>% 
+    select(-new_ce_event, -new_ce_date) %>% 
+    compute_new(indexes=c("person_id"))
+  
+  exclude_reasons <-
+    cohort_entry_corrections %>% 
     mutate(exclude = case_when(
-      covid_phase %in% c("prior","pre-acute", "acute", "post-acute") |
+      ce_event != "covid_date" & 
+        covid_phase %in% c("prior","pre-acute", "acute", "post-acute") ~ 1,
+      ce_event != "flu_date" & 
         flu_phase %in% c("pre-acute", "acute", "post-acute") ~ 1,
-        resp_phase %in% c("pre-acute", "acute", "post-acute") ~ 2, # Changing this to it's ok if someone has a diagnosis of a respiratory condition
+      resp_phase %in% c("pre-acute", "acute", "post-acute") ~ 2, # Changing this to it's ok if someone has a diagnosis of a respiratory condition
       TRUE ~ 0
     )) %>% 
     mutate(exclude_reason = case_when(
@@ -602,6 +633,34 @@ generate_output_outcome_lists <- function(cohort, outcome, outcome_start_date, o
   }
   
   outcomes %>% 
+    output_tbl(output_tbl_name)
+}
+
+generate_analytic_dataset <- function(cohort_demo, rsv_outcomes, output_tbl_name) {
+  
+  cohort_with_rsv_outcomes <-
+    cohort_demo %>% 
+    left_join(rsv_outcomes, by="person_id") %>% 
+    mutate(days_from_index = as.numeric(rsv_evidence_date - ce_date)) %>% 
+    mutate(days_from_index_to_rsv = days_from_index) %>% 
+    mutate(rsv_in_post_acute_period = ifelse(days_from_index >= 30 & days_from_index < 182, 1, 0)) %>% 
+    mutate(rsv_in_post_acute_period = ifelse(rsv_in_post_acute_period==1, "Yes", "No")) %>% 
+    mutate(rsv_occurrence_period = case_when(
+      days_from_index >= 30 & days_from_index < 180 ~ "post acute (1-6 months after index)",
+      days_from_index >=-30 & days_from_index < 30 ~ "acute (within 30 days of index either direction)",
+      days_from_index < -30 & days_from_index > -180 ~ "pre-acute (1-6 months before index)",
+      days_from_index <= -180 ~ "prior (>=6 months before index infection)",
+      TRUE ~ "No evidence of RSV"
+    ))
+  
+  cohort_with_rsv_outcomes %>% 
+    mutate(exclude_based_on_rsv_outcome = 
+             case_when(
+               rsv_occurrence_period %in% c("acute (within 30 days of index either direction)",
+                                            "pre-acute (1-6 months before index)",
+                                            "prior (>=6 months before index infection)") ~ 1,
+               TRUE ~ 0
+             )) %>% 
     output_tbl(output_tbl_name)
 }
 

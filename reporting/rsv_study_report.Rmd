@@ -67,7 +67,7 @@ prettify_kable <- function(data, indents = list()) {
   postacute_min_start_date = as.Date("2022-04-01")
   postacute_max_end_date = as.Date("2023-07-01")
   
-  cohort_entry_start_date = as.Date("2022-03-01")
+  cohort_entry_start_date = as.Date("2022-01-01")
   cohort_entry_end_date = as.Date("2023-01-01")
   
   cohort_1_label = "_rsv_study_cohort_"
@@ -87,6 +87,9 @@ prettify_kable <- function(data, indents = list()) {
   cohort_with_rsv_outcomes <-
     final_cohort_demo %>% 
     left_join(rsv_outcomes, by="person_id")
+  
+  analytic_dataset <-
+    results_tbl(paste0(cohort_1_label, "_analytic_dataset"))
 
 
 ```
@@ -125,12 +128,14 @@ attrition_ordered %>%
   filter(ordering > 0) %>%
   arrange(ordering) %>%
   select(-ordering) %>%
-  prettify_kable(c(3, 4, 5, 8, 9, 10))
+  prettify_kable(c(3, 4,5, 8, 9, 10))
 
 ```
 
 
 Breakdown of patients based on sub-cohort (index infection). 
+
+This should be updated to the final cohort (including exclusions for having the outcome too soon? right? TODO)
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
@@ -181,7 +186,7 @@ final_cohort_demo %>%
   coord_flip() +
   theme_bw() +
   facet_wrap(~sub_cohort, scales="free", ncol=1) +
-  scale_fill_manual(values = wes_palette("FantasticFox1", n=12, type = "continuous")) + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=23, type = "continuous")) + 
   theme(legend.position = "none")
   
 
@@ -411,6 +416,10 @@ post_acute_rsv %>%
   theme(legend.position = "top")
 
 ```
+
+### Analytic data set results
+
+TODO: need to just use the final cohort and report exclusions above in the report
 
 
 
