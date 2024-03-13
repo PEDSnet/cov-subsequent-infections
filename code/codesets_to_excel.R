@@ -6,7 +6,7 @@ install.packages("xlsx")
 library(tidyverse)
 library(writexl)
 
-setwd("~/Documents/PASC/subsequent-infections/cov-subsequent-infections/specs")
+setwd("~/Documents/PASC/subsequent-infections/cov-subsequent-infections/specs/specs_final")
 
 csvs <- list.files(pattern="[.]csv")
 names <- csvs %>% str_remove(".csv")
@@ -17,7 +17,7 @@ for (i in csvs) {
                " rows"))
   sheet_list[[str_remove(i, ".csv")]] <- read_csv(file = i, col_types = "cc")
 }
-write_xlsx(sheet_list, "~/Documents/PASC/subsequent-infections/cov-subsequent-infections/specs/subsq_infections_codesets.xlsx")
+write_xlsx(sheet_list, "~/Documents/PASC/subsequent-infections/cov-subsequent-infections/specs/specs_final/subsq_infections_codesets.xlsx")
 
 setwd("~/Documents/PASC/subsequent-infections/cov-subsequent-infections/")
 
