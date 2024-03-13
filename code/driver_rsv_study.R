@@ -38,8 +38,8 @@ config_append('extra_packages', c())
   cohort_entry_start_date = as.Date("2022-01-01") # Changing to go backward
   cohort_entry_end_date = as.Date("2022-07-01")
 
-  cohort_1_label = "_rsv_study_cohort_"
-  cohort_1_label = "sample_pats"
+  cohort_1_label = "rsv_study_cohort"
+  # cohort_1_label = "sample_pats"
   
   # odr <- cdm_tbl("observation_derivation_recover") %>% # Actually, need observations older than this, in order to get pre-index criteria
   #   filter(observation_date >= ce_start_date,
@@ -61,7 +61,7 @@ config_append('extra_packages', c())
   
   sample_pats_under_6 %>% output_tbl("pat_sample_03_05")
   
-  rslt$triple_cohort <- results_tbl("pat_sample_03_05") %>%  # rslt$pats_under_age_6 %>% 
+  rslt$triple_cohort <- rslt$pats_under_age_6 %>% 
     build_comparison_cohorts_rsv_study(odr_tbl = cdm_tbl("observation_derivation_recover"), # Should probably keep track of the inclusion concept code
                                        ce_start_date = cohort_entry_start_date, 
                                        ce_end_date = cohort_entry_end_date) %>% 
@@ -168,7 +168,7 @@ config_append('extra_packages', c())
     generate_output_outcome_lists(outcome = "rsv",
                                   outcome_start_date = postacute_min_start_date,
                                   outcome_end_date = postacute_max_end_date,
-                                  output_tbl_name = paste0(cohort_1_label, "rsv_outcomes"))
+                                  output_tbl_name = paste0(cohort_1_label, "_rsv_outcomes"))
   
   
   ## Step 3
@@ -181,7 +181,7 @@ config_append('extra_packages', c())
   ## Output final analytic dataset at end, see next driver for modeling and/or reporting analytics!
   ## TODO have this be a running / evolving piece of code that generates the "final analytic dataset" that is ready to be plugged in to different models
   results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
-    generate_analytic_dataset(rsv_outcomes = results_tbl(paste0(cohort_1_label, "rsv_outcomes")),
+    generate_analytic_dataset(rsv_outcomes = results_tbl(paste0(cohort_1_label, "_rsv_outcomes")),
                               output_tbl_name = paste0(cohort_1_label, "_analytic_dataset"))
   
   message('Done.')
