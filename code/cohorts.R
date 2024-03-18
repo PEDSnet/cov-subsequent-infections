@@ -274,7 +274,7 @@ build_comparison_cohorts_rsv_study <- function(cohort_tbl, odr_tbl, ce_start_dat
       exclude == 2 ~ "Has respiratory dx within pre-acute, acute, or post-acute period",
       exclude == 0 ~ "none",
       TRUE ~ paste0("Had COVID: ", covid_phase, ", FLU: ", flu_phase)
-    ))
+    )) 
   
   exclude_reasons %>% 
     mutate(sub_cohort = case_when(

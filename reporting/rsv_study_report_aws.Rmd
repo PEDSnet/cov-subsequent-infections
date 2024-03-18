@@ -65,10 +65,10 @@ prettify_kable <- function(data, indents = list()) {
   #   column_spec(1, bold = T, border_right = T)
 }
 
-  postacute_min_start_date = as.Date("2022-02-01")
+  postacute_min_start_date = as.Date("2022-04-01")
   postacute_max_end_date = as.Date("2023-01-01")
   
-  cohort_entry_start_date = as.Date("2022-01-01")
+  cohort_entry_start_date = as.Date("2022-03-01")
   cohort_entry_end_date = as.Date("2022-07-01")
   
   cohort_1_label = "rsv_study_cohort"
@@ -90,6 +90,8 @@ prettify_kable <- function(data, indents = list()) {
     left_join(rsv_outcomes, by="person_id")
   
   analytic_dataset <- results_tbl(paste0(cohort_1_label, "_analytic_dataset"))
+  
+  ## Can do filtering here for if covid date was imputed or not, already flagged 
 
 
 ```
@@ -160,10 +162,11 @@ attrition_ordered %>%
 ## Attrition following outcome washouts
 
 Patients with the outcome (RSV infection evidence) either prior to or during the acute phase of their index infection will be excluded.
+However, we may need to finalize the start of the post-acute period (compared to the acute period) before finalizing outcome-based cohort exclusions.
 
 See the following table.
 
-```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=5}
 
 final_attrition_groups <-
   analytic_dataset %>% 
@@ -171,10 +174,18 @@ final_attrition_groups <-
   mutate(lab_confirmed_index = ifelse(lab_confirmed==1, "Lab confirmed", "Diagnosis only")) %>% 
   collect()
 
-table1(~ exclude_based_on_rsv_outcome | sub_cohort*lab_confirmed_index,
+table1(~ exclude_based_on_rsv_outcome + rsv_occurrence_period | sub_cohort*lab_confirmed_index,
        data = final_attrition_groups,
        overall = F, title = "Final attrition after outcome washout")
 
+final_attrition_groups %>%
+  ggplot() + 
+  geom_density(aes(x=days_from_index_to_rsv, fill=rsv_occurrence_period, color=rsv_occurrence_period), alpha=0.8) +
+  facet_wrap(~sub_cohort, scales="free", ncol=3) +
+    theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=7, type = "continuous")) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n=7, type = "continuous")) +
+  theme(legend.position = "bottom")
 
 
 ```
@@ -191,7 +202,7 @@ Includes some DQ for sites cohort entry dates, looking strange (perhaps many ind
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
 analytic_dataset %>% 
-  filter(exclude_based_on_rsv_outcome==0) %>% 
+  # filter(exclude_based_on_rsv_outcome==0) %>% # TODO decide whether to exclude or not (yet) don't do any exclusion yet in this report
   group_by(sub_cohort) %>% 
   summarise(persons = n_distinct(person_id)) %>% 
   select("Sub cohort" = sub_cohort, persons) %>% 
@@ -200,7 +211,7 @@ analytic_dataset %>%
 
 ## First: real time density plot of cohort entry dates
 analytic_dataset %>% 
-  filter(exclude_based_on_rsv_outcome==0) %>% 
+  # filter(exclude_based_on_rsv_outcome==0) %>% 
   ggplot() +
   geom_density(aes(x=ce_date, fill=sub_cohort), alpha=0.5) +
   theme_bw() + 
@@ -210,7 +221,7 @@ analytic_dataset %>%
 
 analytic_dataset %>% 
   left_join(cdm_tbl("person") %>% select(person_id, site), by="person_id") %>% 
-  filter(exclude_based_on_rsv_outcome==0) %>% 
+  # filter(exclude_based_on_rsv_outcome==0) %>% 
   group_by(ce_date, sub_cohort, site) %>% 
   summarise(n=n_distinct(person_id)) %>% 
   ungroup() %>% 
@@ -397,7 +408,7 @@ Table 1 of available covariates (in progress, additional covariates to be added)
 
 final_dataset <-
   analytic_dataset %>% 
-  filter(exclude_based_on_rsv_outcome==0) %>% 
+  # filter(exclude_based_on_rsv_outcome==0) %>% 
   mutate(lab_confirmed_index = ifelse(lab_confirmed==1, "lab confirmed", "dx only")) %>% 
   mutate(lab_confirmed_rsv_outcome = ifelse(lab_confirmed_rsv==1, "lab confirmed RSV", "dx only"))
   
@@ -557,9 +568,11 @@ rsv_outcomes_data <- post_acute_rsv %>%
 
 
 
-### RSV post-acute infections as a function of cohort entry week
+### RSV post-acute infections as a function of cohort entry week or month
 
-```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+Investigating proportions over time of each sub-cohort for the presence of RSV
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=6}
 
 
 post_acute_rsv %>% 
@@ -578,6 +591,51 @@ post_acute_rsv %>%
   labs(x="Cohort entry week", y ="Proportion of patients") +
   facet_wrap(~sub_cohort, ncol=1, scales = "free") +
   theme(legend.position = "top")
+
+month_data <- post_acute_rsv %>% 
+  mutate(cohort_entry_month = floor_date(ce_date, unit = "month"))
+
+table1(~ rsv_occurrence_period | sub_cohort*cohort_entry_month,
+       data = month_data, overall=F)
+
+month_data %>% 
+  group_by(cohort_entry_month, sub_cohort, rsv_occurrence_period) %>% 
+  summarise(n=n()) %>% 
+  ungroup() %>% 
+  group_by(sub_cohort, cohort_entry_month) %>% 
+  mutate(monthly_total = sum(n)) %>% 
+  mutate(monthly_prop = as.numeric(n)/as.numeric(monthly_total)) %>% 
+  ungroup() %>% 
+  filter(rsv_occurrence_period != "No evidence of RSV") %>% 
+  ggplot() +
+  geom_bar(aes(x=cohort_entry_month, y = monthly_prop, fill = rsv_occurrence_period), stat="identity", position="stack")+
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=5, type = "continuous")) +
+  labs(x="Cohort entry month", y ="Proportion of patients with index case in month") +
+  facet_wrap(~sub_cohort, ncol=1, scales = "free") +
+  theme(legend.position = "top") +
+  coord_flip()
+
+month_data %>% 
+  group_by(cohort_entry_month, sub_cohort, rsv_occurrence_period) %>% 
+  summarise(n=n()) %>% 
+  ungroup() %>% 
+  group_by(sub_cohort, cohort_entry_month) %>% 
+  mutate(monthly_total = sum(n)) %>% 
+  mutate(monthly_prop = as.numeric(n)/as.numeric(monthly_total)) %>% 
+  ungroup() %>% 
+  filter(rsv_occurrence_period != "No evidence of RSV") %>% 
+  ggplot() +
+  geom_bar(aes(x=cohort_entry_month, y = monthly_prop, fill = sub_cohort), stat="identity", position="dodge")+
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=5, type = "continuous")) +
+  labs(x="Cohort entry month", y ="Proportion of patients with index case in month") +
+  facet_wrap(~rsv_occurrence_period, ncol=3, scales = "free") +
+  theme(legend.position = "top") +
+  coord_flip()
+
+
+
 
 ```
 

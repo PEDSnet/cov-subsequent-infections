@@ -1,9 +1,9 @@
 ###### Anchor dates for conditions
-postacute_min_start_date = as.Date("2022-04-01")
-postacute_max_end_date = as.Date("2023-07-01")
+postacute_min_start_date = as.Date("2022-02-01")
+postacute_max_end_date = as.Date("2023-01-01")
 
-cohort_entry_start_date = as.Date("2022-03-01")
-cohort_entry_end_date = as.Date("2023-01-01")
+cohort_entry_start_date = as.Date("2022-01-01")
+cohort_entry_end_date = as.Date("2022-07-01")
 
 
 ### Step 1: Analysis of time-to-outcome for RSV outcomes
@@ -42,31 +42,41 @@ covid_tests <-
 ### Combined person, test, date, value
 combined_tests <-
   flu_tests %>% 
-  distinct(person_id, site, concept_id, concept_name, concept_code, measurement_date, value_as_concept_id) %>% 
+  group_by(person_id, site, concept_id, concept_name, concept_code, measurement_date, value_as_concept_id) %>% 
+  filter(row_number() == 1) %>% 
   select(person_id, site, measurement_date, flu_concept_id = concept_id, flu_concept_name = concept_name, flu_concept_code = concept_code,
          flu_value_as_concept_id = value_as_concept_id) %>% 
   full_join(
     covid_tests %>% 
-      distinct(person_id, site, measurement_concept_id, measurement_date, value_as_concept_id) %>% 
+      group_by(person_id, site, measurement_concept_id, measurement_date, value_as_concept_id) %>% 
+      filter(row_number() == 1) %>% 
       select(person_id, site, measurement_date, covid_concept_id = measurement_concept_id,
              covid_value_as_concept_id = value_as_concept_id),
     by=c("person_id", "site", "measurement_date")
   ) %>% 
   full_join(
     rsv_tests %>% 
-      distinct(person_id, site, concept_id, concept_name, concept_code, measurement_date, value_as_concept_id) %>% 
+      group_by(person_id, site, concept_id, concept_name, concept_code, measurement_date, value_as_concept_id) %>% 
+      filter(row_number() == 1) %>% 
       select(person_id, site, measurement_date, rsv_concept_id = concept_id, rsv_concept_name = concept_name, rsv_concept_code = concept_code,
              rsv_value_as_concept_id = value_as_concept_id),
     by=c("person_id", "site", "measurement_date")
   ) %>% 
   compute_new(indexes=c("person_id", "site"))
 
-combined_tests_labeled <-
+combined_tests_collect <-
   combined_tests %>% 
+  collect() %>% 
   select(person_id, site, measurement_date,
          flu_value_as_concept_id, covid_value_as_concept_id, rsv_value_as_concept_id) %>% 
   # pivot_longer(cols = c("flu_concept_id", "covid_concept_id", "rsv_concept_id"), names_to = "virus_concept", values_to = "concept_id") %>% 
-  pivot_longer(cols = c("flu_value_as_concept_id", "covid_value_as_concept_id", "rsv_value_as_concept_id"), names_to = "virus", values_to = "value_as_concept_id") %>% 
+  pivot_longer(cols = c("flu_value_as_concept_id", "covid_value_as_concept_id", "rsv_value_as_concept_id"),
+               names_to = "virus", values_to = "value_as_concept_id")
+
+combined_tests_copy <- copy_to_new(df = combined_tests_collect)
+
+combined_tests_labeled <-
+  combined_tests_copy %>% 
   left_join(vocabulary_tbl("concept") %>% 
               select(concept_id, value_as_concept_name = concept_name), by=c("value_as_concept_id"="concept_id")) %>% 
   compute_new(indexes=c("person_id", "site"))
@@ -126,7 +136,7 @@ panel_summaries <-
   compute_new()
 
 panel_summaries %>% 
-  output_tbl("test_panel_pedsnet_summaries")
+  output_tbl("test_panel_aws_summaries")
 
 panel_summaries %>% 
   filter(!panel_value=="Cov: No test evidence, Flu: No test evidence, RSV: No test evidence") %>% 

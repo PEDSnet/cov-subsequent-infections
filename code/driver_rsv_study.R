@@ -32,10 +32,10 @@ config_append('extra_packages', c())
   ## Special inclusion/exclusion criteria for overlap in cohorts
   
   ###### Anchor dates for conditions
-  postacute_min_start_date = as.Date("2022-02-01")
+  postacute_min_start_date = as.Date("2022-04-01")
   postacute_max_end_date = as.Date("2023-01-01")
   
-  cohort_entry_start_date = as.Date("2022-01-01") # Changing to go backward
+  cohort_entry_start_date = as.Date("2022-03-01")
   cohort_entry_end_date = as.Date("2022-07-01")
 
   cohort_1_label = "rsv_study_cohort"
