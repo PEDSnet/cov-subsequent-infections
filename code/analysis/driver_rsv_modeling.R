@@ -131,6 +131,7 @@ logit_adjustment <- glm(rsv_outcome ~ covid + race_eth_cat + age_group + sex_cat
 summary(logit_adjustment)
 
 
+
 #### Cox regression
 
 

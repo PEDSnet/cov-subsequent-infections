@@ -1,5 +1,5 @@
-#' Get flu diagnosed patients, from scrach, from condition occurence table.
-#' Does not take an existing cohort as a parameter
+#' Get flu diagnosed patients for a cohort, returns earliest flu evidence between dates given
+#' Cohort can just be some subset of the person_tbl, or the whole thing if necessary for finding patients
 #'
 #' @param min_date 
 #' @param max_date 
@@ -32,8 +32,8 @@ get_flu_evidence <- function(cohort_tbl, min_date, max_date, test_only = FALSE) 
   
   if (test_only == TRUE) {
     flu_tests %>% 
-      filter(value_as_concept_id == 9191) %>% 
-      group_by(person_id) %>% # This part just gets the patient's earliest flu evidence, but instead, could just mark a new column as "first" that could later be filtered
+      filter(value_as_concept_id %in% c(9191L, 2000001526)) %>% 
+      group_by(person_id) %>%
       slice_min(measurement_date, with_ties = FALSE) %>% 
       ungroup() %>% 
       select(person_id, earliest_flu_test = measurement_date,
@@ -44,15 +44,15 @@ get_flu_evidence <- function(cohort_tbl, min_date, max_date, test_only = FALSE) 
       return()
   } else{
     flu_tests %>% 
-      filter(value_as_concept_id == 9191) %>% 
-      group_by(person_id) %>% # This part just gets the patient's earliest flu evidence, but instead, could just mark a new column as "first" that could later be filtered
+      filter(value_as_concept_id %in% c(9191L, 2000001526)) %>% 
+      group_by(person_id) %>% 
       slice_min(measurement_date, with_ties = FALSE) %>% 
       ungroup() %>% 
       select(person_id, earliest_flu_test = measurement_date) %>% 
       compute_new(indexes=c("person_id")) %>% 
       full_join(flu_conditions %>% 
                   group_by(person_id) %>% 
-                  slice_min(condition_start_date, with_ties = FALSE) %>% # Same here, instead of slicing the min, could just identify the min
+                  slice_min(condition_start_date, with_ties = FALSE) %>% 
                   ungroup() %>% 
                   select(person_id, flu_dx_date = condition_start_date) %>% 
                   compute_new(indexes=c("person_id")), by=c("person_id")) %>% 
