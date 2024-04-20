@@ -5,29 +5,20 @@ library(cobalt)
 library(ggplot2)
 
 
-postacute_min_start_date = as.Date("2022-02-01")
+postacute_min_start_date = as.Date("2022-04-01")
 postacute_max_end_date = as.Date("2023-01-01")
 
-cohort_entry_start_date = as.Date("2022-01-01")
+cohort_entry_start_date = as.Date("2022-03-01")
 cohort_entry_end_date = as.Date("2022-07-01")
 
-cohort_1_label = "_rsv_study_cohort_"
-cohort_1_label = "sample_pats"
+cohort_1_label = "rsv_study_cohort"
+# cohort_1_label = "sample_pats"
 
-exclusion_reasons <- results_tbl(paste0(cohort_1_label, "_w_exclusion_reasons"))
-
-attrition <- results_tbl(paste0(cohort_1_label, "_attrition"))
-
-final_cohort_demo <- results_tbl(paste0(cohort_1_label, "_cohort_demo"))
-
-rsv_outcomes <- results_tbl(paste0(cohort_1_label, "_rsv_outcomes"))
-
-cohort_with_rsv_outcomes <-
-  final_cohort_demo %>% 
-  left_join(rsv_outcomes, by="person_id")
 
 analytic_dataset <-
-  results_tbl(paste0(cohort_1_label, "_analytic_dataset"))
+  results_tbl(paste0(cohort_1_label, "_analytic_dataset")) %>% 
+  filter(ce_date >= cohort_entry_start_date,
+         ce_date < cohort_entry_end_date)
 
 
 ## TODO why are there multiple rows for the same person
@@ -35,45 +26,116 @@ analytic_dataset <-
 # not just earliest because there could be like a prior case, and then a pot-acute case
 final_analytic_dataset <-
   analytic_dataset %>% 
+  filter(sex_cat != "Other/unknown") %>% 
   filter(is.na(covid_index_date_imputed) | covid_index_date_imputed==0) %>% 
   group_by(person_id) %>% 
-  mutate(exclude = max(exclude_based_on_rsv_outcome)) %>% 
+  mutate(exclude = max(exclude_based_on_rsv_outcome)) %>% ## TODO just exclude for prior rsv
   filter(exclude < 1) %>% 
   slice_min(rsv_evidence_date, with_ties=FALSE) %>% 
   ungroup() %>% 
+  # mutate(new_rsv_outcome_fu = case_when(
+  #   rsv_occurrence_period %in% c("post acute (1-6 months after index)", "Future RSV 180-300 days)") ~ 1,
+  #   TRUE ~ 0
+  # )) %>% 
   compute_new(indexes=c("person_id"))
+
+final_analytic_dataset_nonexclusion <-
+  analytic_dataset %>% 
+  filter(sex_cat != "Other/unknown") %>% 
+  filter(is.na(covid_index_date_imputed) | covid_index_date_imputed==0) %>% 
+  group_by(person_id) %>% 
+  mutate(exclude = max(exclude_for_prior_rsv)) %>% 
+  filter(exclude < 1) %>%
+  slice_min(rsv_evidence_date, with_ties=FALSE) %>% 
+  ungroup() %>% 
+  # mutate(new_rsv_outcome_fu = case_when(
+  #   rsv_occurrence_period %in% c("post acute (1-6 months after index)", "Future RSV 180-300 days)") ~ 1,
+  #   TRUE ~ 0
+  # )) %>% 
+  compute_new(indexes=c("person_id"))
+
+iptw_flu <- final_analytic_dataset_nonexclusion %>% 
+  do_iptw(cohort_entry_start_date = cohort_entry_start_date,
+          comparison_cohort = "Influenza",
+          weight_formula = "covid~age_group+sex_cat+race_eth_cat+ce_week_factor",
+          iptw_description = "covid_flu_comparison")
+
+iptw_ari <- final_analytic_dataset_nonexclusion %>% 
+  do_iptw(cohort_entry_start_date = cohort_entry_start_date,
+          comparison_cohort = "Respiratory",
+          weight_formula = "covid~age_group+sex_cat+race_eth_cat+ce_week_factor",
+          iptw_description = "covid_ari_comparison")
 
 #### IPTW
 
 iptw_dataset <-
-  final_analytic_dataset %>% 
+  final_analytic_dataset_nonexclusion %>% 
   mutate(ce_week = as.Date(floor_date(ce_date, unit="week"))) %>% 
   mutate(study_start_date = as.Date(cohort_entry_start_date)) %>% 
   mutate(ce_date_days_numeric = as.numeric(ce_date-study_start_date)) %>% 
   mutate(ce_week_days_numeric = as.numeric(ce_week-study_start_date)) %>% 
-  compute_new(indexes=c("person_id"))
+  collect() %>% 
+  mutate(ce_week_factor = as.factor(ce_week_days_numeric)) 
+  # compute_new(indexes=c("person_id"))
 
 ### Now first want to limit the cohort to the COVID/flu comparison:
 iptw_covid_flu <-
   iptw_dataset %>% 
   filter(sub_cohort %in% c("COVID", "Influenza")) %>% 
-  mutate(covid = ifelse(sub_cohort=="COVID", 1, 0)) %>% 
-  mutate(rsv_outcome = case_when(
-    is.na(rsv_in_post_acute_period) ~ 0,
-    rsv_in_post_acute_period == "No" ~ 0,
-    rsv_in_post_acute_period == "Yes" ~ 1
-  )) %>% 
-  collect()
+  mutate(covid = ifelse(sub_cohort=="COVID", 1, 0)) 
 
 
 #### Calling modeling stuff from function
-weight_formula = as.formula('covid~age_group+sex_cat+race_eth_cat+ce_week_days_numeric')
+weight_formula = as.formula('covid~age_group+sex_cat+race_eth_cat+ce_week_factor')
+
+weight_formula_with_util = as.formula('covid~age_group+sex_cat+race_eth_cat+ce_week_factor+util_other+util_inpatient+util_outpatient+util_ed')
+
+# TODO change the function also to output model coefficient results based on pre-weight analysis
+covid_flu_iptw_results <- 
+  make_iptw_and_mw_weights_colby(weight_formula = weight_formula_with_util,
+                               dataset = iptw_covid_flu,
+                               description = "covid_flu_nonexclude" # covid_flu_noutil
+                               )
+covid_flu_iptw_results$love_plot
+
+ggsave(paste0("results/", "covid_flu_nonexclude", "_love_plot.png"), width = 8, height = 8, dpi = 400)
 
 covid_flu_iptw_results <- 
-  make_iptw_and_mw_weights_colby(weight_formula = weight_formula,
-                               dataset = iptw_covid_flu,
-                               description = "covid_flu_sample"
-                               )
+  make_iptw_and_mw_weights_colby(weight_formula = weight_formula_with_util,
+                                 dataset = iptw_covid_flu,
+                                 description = "covid_flu_util"
+  )
+
+
+covid_flu_iptw_results$love_plot
+
+ggsave(paste0("results/", "covid_flu_util", "_love_plot.png"), width = 8, height = 8, dpi = 400)
+
+
+### Now first want to limit the cohort to the COVID/respiratory comparison:
+iptw_covid_ari <-
+  iptw_dataset %>% 
+  filter(sub_cohort %in% c("COVID", "Respiratory")) %>% 
+  mutate(covid = ifelse(sub_cohort=="COVID", 1, 0)) 
+
+
+#### Calling modeling stuff from function
+weight_formula = as.formula('covid~age_group+sex_cat+race_eth_cat+ce_week_factor')
+
+weight_formula_with_util = as.formula('covid~age_group+sex_cat+race_eth_cat+ce_week_factor+util_other+util_inpatient+util_outpatient+util_ed')
+
+# TODO change the function also to output model coefficient results based on pre-weight analysis
+covid_ari_iptw_results <- 
+  make_iptw_and_mw_weights_colby(weight_formula = weight_formula_with_util,
+                                 dataset = iptw_covid_ari,
+                                 description = "covid_ari_util"
+  )
+
+
+covid_ari_iptw_results$love_plot
+
+ggsave(paste0("results/", "covid_ari_util", "_love_plot.png"), width = 8, height = 8, dpi = 400)
+
 
 
 #iptw_covid_flu %>% group_by(ce_week_days_numeric, sub_cohort) %>% summarise(n=n()) %>% ggplot() + geom_bar(aes(x=ce_week_days_numeric, y = n, fill=sub_cohort), stat="identity", position="dodge")
@@ -124,11 +186,94 @@ logit_no_adjustment <- glm(rsv_outcome ~ covid,
 
 summary(logit_no_adjustment)
 
+library(jtools)
+
+
+models = list()
+
+models$model_unweighted_unadjusted <- run_logistic_regression(data = covid_flu_iptw_results$dataset,
+                                                       formula = as.formula("rsv_outcome ~ covid"),
+                                                       use_weights = FALSE,
+                                                       weight_col = NA)
+
+models$model_weighted_lr_unadjusted <- run_logistic_regression(data = covid_flu_iptw_results$dataset,
+                                                       formula = as.formula("rsv_outcome ~ covid"),
+                                                       use_weights = TRUE,
+                                                       weight_col = capped_iptw)
+
+models$model_weighted_gbm_unadjusted <- run_logistic_regression(data = covid_flu_iptw_results$dataset,
+                                                        formula = as.formula("rsv_outcome ~ covid"),
+                                                        use_weights = TRUE,
+                                                        weight_col = iptw_gbm)
+
+models$model_weighted_lr_adjusted <- run_logistic_regression(data = covid_flu_iptw_results$dataset,
+                                                         formula = as.formula("rsv_outcome ~ covid + race_eth_cat + age_group + sex_cat + ce_week_days_numeric"),
+                                                         use_weights = TRUE,
+                                                         weight_col = capped_iptw)
+
+models$model_weighted_gbm_adjusted <- run_logistic_regression(data = covid_flu_iptw_results$dataset,
+                                                         formula = as.formula("rsv_outcome ~ covid + race_eth_cat + age_group + sex_cat + ce_week_days_numeric"),
+                                                         use_weights = TRUE,
+                                                         weight_col = iptw_gbm)
+
+plot_summs(models$model_unweighted_unadjusted, 
+           models$model_weighted_lr_unadjusted,
+           models$model_weighted_gbm_unadjusted,
+           models$model_weighted_lr_adjusted,
+           models$model_weighted_gbm_adjusted,
+           model.names = c("Unweighted, unadjusted", "Weighted (LR), unadjusted", 
+                           "Weighted (GBM), unadjusted", "Weighted (LR), adjusted",
+                           "Weighted (GBM), adjusted"))
+
 logit_adjustment <- glm(rsv_outcome ~ covid + race_eth_cat + age_group + sex_cat, 
                            data = covid_flu_iptw_results$dataset, family = quasibinomial(link="logit"), 
                            weights = capped_iptw)
 
 summary(logit_adjustment)
+
+logit_no_weighted <- glm(rsv_outcome ~ covid, 
+                         data = covid_flu_iptw_results$dataset, family = binomial(link="logit"))
+
+summary(logit_no_weighted)
+## Unweighted, way more likely to get RSV after covid. But then weighted, with o adjustment, says less likely,
+# but not statistically significant
+
+logit_adjustment <- glm(rsv_outcome ~ covid + race_eth_cat + age_group + sex_cat + ce_week_days_numeric, 
+                        data = covid_flu_iptw_results$dataset, family = quasibinomial(link="logit"), 
+                        weights = capped_iptw)
+
+summary(logit_adjustment)
+
+logit_gbm <- glm(rsv_outcome ~ covid, 
+                        data = covid_flu_iptw_results$dataset, family = quasibinomial(link="logit"), 
+                        weights = iptw_gbm)
+
+summary(logit_gbm)
+
+logit_gbm_adjusted <- glm(rsv_outcome ~ covid + age_group + ce_week_days_numeric, 
+                 data = covid_flu_iptw_results$dataset, family = quasibinomial(link="logit"), 
+                 weights = iptw_gbm)
+
+summary(logit_gbm_adjusted)
+
+plot_summs(logit_adjustment_gbm, logit_no_weighted, logit_adjustment, logit_gbm_adjusted,
+           model.names = c("GBM weights", "unweighted", "LR weights, adjusted", "GBM weights, adjusted"))
+
+## For exporting the fit summary table comparison 
+# export_summs(fit, fit2, scale = TRUE,
+#              error_format = "[{conf.low}, {conf.high}]")
+
+pairs_data <- covid_flu_iptw_results$dataset %>% 
+  select(race_eth_cat, age_group, ce_week_days_numeric, sub_cohort) 
+
+library(GGally)
+
+ggpairs(pairs_data) +
+  theme_bw()
+
+## Need to make a logistic regression outcome model pipeline
+
+### TODO have some way to output and save the logistic regression models 
 
 
 

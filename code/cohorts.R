@@ -397,7 +397,7 @@ flag_study_eligiblity <- function(cohort_with_flags, ce_start_date, ce_end_date)
     return()
 }
 
-flag_utilization_level <- function(cohort, visit_tbl, lookback_days) {
+flag_utilization_level <- function(cohort, visit_tbl, lookback_days, tbl_count_label = "cohort") {
   cohort_visits_lookback <- cohort %>% 
     select(person_id, ce_date) %>% 
     left_join(visit_tbl, by="person_id") %>% 
@@ -405,60 +405,83 @@ flag_utilization_level <- function(cohort, visit_tbl, lookback_days) {
            visit_start_date < ce_date) %>% 
     compute_new(indexes=c("person_id"))
   
-  ### What do we want? A column for each visit type, with the quintile category that that patient belongs to
-  
   visit_lookback_counts <-
     cohort_visits_lookback %>% 
     mutate(visit_type_rough = case_when(visit_concept_name %in% c("Outpatient Visit - Non Physician",
                                                                   "Outpatient Visit") ~ "outpatient",
                                         visit_concept_name %in% c("Inpatient Visit - Ongoing", 
                                                                   "Inpatient Visit",
-                                                                  "Observation Stay - PCORNet",
-                                                                  "Emergency Department Admit to Inpatient Hospital Stay- PCORNet",
-                                                                  "Emergency Room Visit") ~ "inpatient_or_ed",
-                                        visit_concept_name %in% c("Other ambulatory visit",
-                                                                  "Administrative Visit",
-                                                                  "Interactive Telemedicine Service",
-                                                                  "Non-hospital institution Visit",
-                                                                  "Other") ~ "admin_other_telemed"
+                                                                  "Observation Stay - PCORNet") ~ "inpatient",
+                                        visit_concept_name %in% c( "Emergency Department Admit to Inpatient Hospital Stay- PCORNet",
+                                                                   "Emergency Room Visit") ~ "ed",
+                                        TRUE ~ "other"
     )) %>% 
     group_by(person_id, visit_type_rough, visit_start_date) %>% 
-    slice_min(visit_start_date, with_ties = FALSE) %>% 
+    slice_min(visit_start_date, with_ties = FALSE) %>% # get just the first visit record on that day
     ungroup() %>% 
     group_by(person_id, visit_type_rough) %>% 
     summarise(n_visits_type = n()) %>% 
     ungroup() %>% 
     compute_new()
   
+  visit_lookback_counts %>% 
+    output_tbl(paste0(tbl_counts_label, "_visit_lookback_counts"))
+  
+  ## Use the table from above to compute proper quantile categories
+  ## Ideal: high, normal, low/none
   visit_type_quantiles <-
     visit_lookback_counts %>% 
     group_by(visit_type_rough) %>% 
-    summarise(quant20 = quantile(n_visits_type, probs=0.2),
-              quant40 = quantile(n_visits_type, probs = .4), 
-              quant60 = quantile(n_visits_type, probs = .6), 
-              quant80 = quantile(n_visits_type, probs = 1)) %>% 
+    summarise(lower_third = quantile(n_visits_type, probs=0.33),
+              middle_third = quantile(n_visits_type, probs = .66), 
+              upper_third = quantile(n_visits_type, probs=.975)) %>% 
     ungroup() %>% 
     compute_new()
   
+  visit_type_quantiles_no_outliers <-
+    visit_lookback_counts %>% 
+    left_join(visit_type_quantiles, by="visit_type_rough") %>% 
+    filter(n_visits_type < upper_third) %>% 
+    group_by(visit_type_rough) %>% 
+    summarise(lower_third = quantile(n_visits_type, probs=0.33),
+              middle_third = quantile(n_visits_type, probs = .66), 
+              upper_third = quantile(n_visits_type, probs=.975)) %>% 
+    ungroup() %>% 
+    compute_new()
   
   cohort_with_util_flags <-
     visit_lookback_counts %>% 
-    left_join(visit_type_quantiles, by="visit_type_rough") %>% 
+    left_join(visit_type_quantiles_no_outliers, by="visit_type_rough") %>% 
     mutate(personal_visit_category = case_when(
-      n_visits_type >= quant80 ~ paste("Num visits >=", quant80), 
-      n_visits_type >= quant60 ~ paste("Num visits >=", quant60), 
-      n_visits_type >= quant40 ~ paste("Num visits >=", quant40), 
-      n_visits_type >= quant20 ~ paste("Num visits >=", quant20),
-      n_visits_type < quant20 ~ paste("Num visits <", quant20)
+      n_visits_type < lower_third ~ paste0("visits_less_than_", lower_third),
+      n_visits_type < middle_third ~ paste0("visits_less_than_", middle_third),
+      n_visits_type < upper_third ~ paste0("visits_less_than_", upper_third),
+      TRUE ~ paste0("visits_", upper_third, "_or_more")
     )) %>% 
     pivot_wider(id_cols = person_id, 
                 names_from = visit_type_rough, 
                 names_prefix = "visit_type_", 
                 values_from = personal_visit_category,
-                values_fill ="No visits")
+                values_fill ="no_visits")
   
   cohort %>% 
     left_join(cohort_with_util_flags, by="person_id") %>% 
+    mutate(visit_type_outpatient = case_when(
+      is.na(visit_type_outpatient) ~ "no_visits",
+      TRUE ~ visit_type_outpatient
+    )) %>% 
+    mutate(visit_type_inpatient = case_when(
+      is.na(visit_type_inpatient) ~ "no_visits",
+      TRUE ~ visit_type_inpatient
+    )) %>% 
+    mutate(visit_type_ed = case_when(
+      is.na(visit_type_ed) ~ "no_visits",
+      TRUE ~ visit_type_ed
+    )) %>% 
+    mutate(visit_type_other = case_when(
+      is.na(visit_type_other) ~ "no_visits",
+      TRUE ~ visit_type_other
+    )) %>% 
     return()
   
 }
@@ -562,7 +585,7 @@ cohort_demo <- function(cohort_tbl) {
                                      TRUE ~ "4-5y old")) %>% 
     mutate(cohort_entry_week = floor_date(ce_date, unit="week")) %>% 
     select(-gender_concept_id, -race_concept_id, -ethnicity_concept_id) %>% 
-    flag_utilization_level(cdm_tbl("visit_occurrence"), lookback_days = 365) %>% 
+    # flag_utilization_level(cdm_tbl("visit_occurrence"), lookback_days = 365) %>% 
     # left_join(results_tbl(paste0("cohort", cohort_1_label, "pmca")), by="person_id") %>% 
     compute_new(indexes=c("person_id"))
   
@@ -636,29 +659,64 @@ generate_output_outcome_lists <- function(cohort, outcome, outcome_start_date, o
     output_tbl(output_tbl_name)
 }
 
-generate_analytic_dataset <- function(cohort_demo, rsv_outcomes, output_tbl_name) {
+generate_analytic_dataset <- function(cohort_demo, 
+                                      rsv_outcomes, 
+                                      util_quantiles_tbl, 
+                                      hospitalization_tbl, 
+                                      ventilator_use_tbl,
+                                      pmca_tbl,
+                                      output_tbl_name) {
   
   cohort_with_rsv_outcomes <-
     cohort_demo %>% 
+    left_join(util_quantiles_tbl, by="person_id") %>% 
+    left_join(hospitalization_tbl, by="person_id") %>% 
+    left_join(ventilator_use_tbl, by="person_id") %>% 
+    left_join(pmca_tbl, by="person_id") %>% 
     left_join(rsv_outcomes, by="person_id") %>% 
     mutate(days_from_index = as.numeric(rsv_evidence_date - ce_date)) %>% 
     mutate(days_from_index_to_rsv = days_from_index) %>% 
-    mutate(rsv_in_post_acute_period = ifelse(days_from_index >= 30 & days_from_index < 182, 1, 0)) %>% 
-    mutate(rsv_in_post_acute_period = ifelse(rsv_in_post_acute_period==1, "Yes", "No")) %>% 
     mutate(rsv_occurrence_period = case_when(
-      days_from_index >= 30 & days_from_index < 180 ~ "post acute (1-6 months after index)",
-      days_from_index >=-30 & days_from_index < 30 ~ "acute (within 30 days of index either direction)",
+      days_from_index >= 15 & days_from_index < 180 ~ "post acute (15-180 days after index)",
+      days_from_index >=-30 & days_from_index < 15 ~ "acute (within 15 days of index or 30 days before)",
       days_from_index < -30 & days_from_index > -180 ~ "pre-acute (1-6 months before index)",
       days_from_index <= -180 ~ "prior (>=6 months before index infection)",
+      days_from_index >= 180 & days_from_index < 300 ~ "Future RSV (180-300 days)",
       TRUE ~ "No evidence of RSV"
-    ))
+    )) %>% 
+    mutate(outcome_rsv_30_to_180 = case_when(days_from_index >= 30 & rsv_occurrence_period == "post acute (15-180 days after index)" ~ 1,
+                                                TRUE ~ 0)) %>% 
+    mutate(outcome_rsv_15_to_180 = case_when(days_from_index >= 15 & rsv_occurrence_period == "post acute (15-180 days after index)" ~ 1,
+                                                TRUE ~ 0)) %>% 
+    mutate(outcome_rsv_15_to_300 = case_when(rsv_occurrence_period == "post acute (15-180 days after index)" ~ 1,
+                                            rsv_occurrence_period == "Future RSV (180-300 days)" ~ 1,
+                                                TRUE ~ 0)) %>% 
+    mutate(outcome_rsv_1_to_60 = case_when(days_from_index > 0 & days_from_index < 60 ~ 1,
+                                           TRUE ~ 0)) %>% 
+    mutate(outcome_rsv_0_to_60 = case_when(days_from_index >= 0 & days_from_index < 60 ~ 1,
+                                           TRUE ~ 0)) %>% 
+    mutate(outcome_rsv_same_day = case_when(days_from_index == 0 ~ 1,
+                                           TRUE ~ 0)) %>% 
+    mutate(util_inpatient = case_when(visit_type_inpatient == "no_visits" ~ "no_visits",
+                                      visit_type_inpatient == "visits_3_or_more" ~ "high_utilizer",
+                                      visit_type_inpatient == "visits_less_than_3" ~ "low_utilizer")) %>% 
+    mutate(util_outpatient = case_when(visit_type_outpatient == "no_visits" ~ "no_visits",
+                                       visit_type_outpatient == "visits_less_than_6" ~ "moderate_utilizer",
+                                       visit_type_outpatient == "visits_less_than_3" ~ "low_utilizer",
+                                       TRUE ~ "high_utilizer")) %>% 
+    mutate(util_ed = case_when(visit_type_ed == "no_visits" ~ "no_visits",
+                               visit_type_ed == "visits_less_than_4" ~ "moderate_utilizer",
+                               visit_type_ed == "visits_less_than_2" ~ "low_utilizer",
+                               TRUE ~ "high_utilizer")) %>% 
+    mutate(util_other = case_when(visit_type_other == "no_visits" ~ "no_visits",
+                                  visit_type_other == "visits_less_than_8" ~ "moderate_utilizer",
+                                  visit_type_other == "visits_less_than_3" ~ "low_utilizer",
+                                  TRUE ~ "high_utilizer"))
   
   cohort_with_rsv_outcomes %>% 
-    mutate(exclude_based_on_rsv_outcome = 
+    mutate(exclude_for_prior_rsv = 
              case_when(
-               rsv_occurrence_period %in% c("acute (within 30 days of index either direction)",
-                                            "pre-acute (1-6 months before index)",
-                                            "prior (>=6 months before index infection)") ~ 1,
+               days_from_index_to_rsv < 0 ~ 1,
                TRUE ~ 0
              )) %>% 
     output_tbl(output_tbl_name)
@@ -825,6 +883,201 @@ get_insurance_class <- function(cohort) {
     return()
   
 }
+
+
+
+
+#' **Primary use function** to add a single variable column describing the severity of the index infection to a cohort
+#' 
+#' @param cohort Must have `index_date` column
+#'
+#' @return Cohort with new column `index_severity`, data type: character
+#' @export
+#'
+#' @examples
+#' 
+#' cohort %>% 
+#'   flag_severity()
+#' 
+flag_severity <- function(cohort) {
+  cohort %>% 
+    flag_hospitalizations() %>% 
+    get_severe_hospitalizations() %>% 
+    mutate(index_severity = case_when(
+      visit_span_criteria_rank == 1 ~ "Hospitalized, with covid", # Else, visit type is 2, proceed with the categories
+      hospitalized_for_covid == 1 & hosp_with_vent==1 ~ "Hospitalized for covid (with ventilation)",
+      hospitalized_for_covid == 1 ~ "Hospitalized for covid (without ventilation)",
+      hospital_flag == 1 & hosp_with_vent==1 ~ "Hospitalized, with covid", # Aka, hospitalized around the index date, but not with explicit evidence of covid
+      hospital_flag==1 && is.na(hosp_with_vent) ~ "Hospitalized, with covid", # Aka, hospitalized around the index date, but not with explicit evidence of covid
+      TRUE ~ "Never hospitalized")) %>% 
+    return()
+}
+
+#' Look to see if the patient was hospitalized in (the day of - 1 days before to 
+#' 16 days following the index date, params can be changed)
+#' 
+#' 
+#' The function assigns a `visit_span_criteria_rank` of `2` if the hospital visit is 
+#' within the window, rank of `1` if it's outside, in order to take the max rank later in the function.
+#' 
+#' @param cohort cohort table for specific definition, including person_id and observation_date (index date)
+#' @param visit_tbl PEDSnet visit table with hospitalization information
+#' @param days_before number of days before index date to check hospitalization
+#' @param days_after number of days after index date to check hospitalization
+#' @return Cohort table with hospitalization status for the visit with the index COVID-19 infection
+#'
+get_hospitalization <- function(cohort,
+                                visit_tbl = cdm_tbl('visit_occurrence',
+                                                    db=config('db_src')),
+                                days_before = 1,
+                                days_after = 7
+) {
+  hosp_visit_ranks <- cohort %>%
+    inner_join(select(visit_tbl,
+                      person_id,
+                      visit_start_date,
+                      visit_end_date,
+                      visit_concept_id, visit_occurrence_id), by='person_id') %>%
+    filter(visit_concept_id %in% c(9201L, 2000000048L, 2000000088L)) %>% 
+    filter((visit_start_date >= index_date-days(days_before) &
+              visit_start_date <= index_date+days(days_after)) |
+             (visit_start_date >=index_date-days(30) & visit_end_date > index_date)) %>%
+    mutate( visit_span_criteria_rank = case_when((visit_start_date >= index_date-days(days_before) &
+                                                    visit_start_date <= index_date+days(days_after)) ~ 2, # Rank of 2 if it's within the window, rank of 1 if it's outside, in order to take the max rank later
+                                                 (visit_start_date >=index_date-days(30) & visit_end_date > index_date) ~ 1)) %>%
+    compute_new(indexes=c("person_id", "visit_occurrence_id"))
+  
+  # primary_billing_codes <- c(2000000092, 2000001423, 2000001424, 2000001282, 2000000093, 2000000096, 2000000095)
+  # 
+  # covid_dx_specific<-load_codeset('covid_dx') %>% filter(dx_class=='dx') %>% mutate(covid=1L) %>%
+  #   dplyr::select(concept_id, covid) %>% 
+  #   compute_new(indexes=list(c('concept_id')))
+  # 
+  hosp_tbl <- 
+    hosp_visit_ranks %>% 
+    # inner_join(cdm_tbl("condition_occurrence") %>% 
+    #              select(condition_concept_id, visit_occurrence_id, condition_type_concept_id),
+    #            by=c("visit_occurrence_id")) %>% 
+    #    inner_join(vocabulary_tbl("concept") %>% select(concept_id, concept_name), 
+    #               by=c("condition_concept_id"="concept_id")) %>% 
+    select(person_id, visit_occurrence_id, visit_start_date, visit_span_criteria_rank) %>% 
+    #    inner_join(vocabulary_tbl("concept") %>% select(condition_type_concept_id=concept_id), by="condition_type_concept_id") %>% 
+    #    mutate(covid = str_detect(tolower(concept_name), 'covid') | 
+    #             str_detect(tolower(concept_name), 'sars-cov') | 
+    #             str_detect(tolower(concept_name), 'coronavirus')) %>% 
+    # left_join(covid_dx_specific, by=c('condition_concept_id'='concept_id')) %>%
+    # mutate(covid=case_when(
+    #   is.na(covid)~0L,
+    #   TRUE~covid
+    # )) %>% 
+    # mutate(covid_1st_position = ifelse(condition_type_concept_id %in% primary_billing_codes, 1, 0)) %>%  # Here, check if condition_type concept is in a list of type concepts that make sense for the primary
+    # mutate(covid = as.integer(covid)) %>% 
+    # mutate(primary_billing_covid = case_when(is.na(covid_1st_position) & covid==1 ~ 1,
+    #                                          covid==1 & covid_1st_position==1 ~ 1,
+    #                                          covid==1 & covid_1st_position==0 ~ 0,
+    #                                          covid==0 ~ 0)) %>% 
+    group_by(person_id, visit_start_date, visit_span_criteria_rank) %>%
+    summarise(hosp_visit_num=n()) %>%
+    # Make a new column that is covid 1st position or covid it all if that is not available data, then use that to make the buckets
+    ungroup() %>%
+    filter(hosp_visit_num >= 1L) %>%
+    mutate(hospital_flag = 1L) %>%
+    select(person_id, hospital_flag, visit_start_date, visit_span_criteria_rank) %>%
+    group_by(person_id, hospital_flag, visit_start_date) %>% 
+    filter(row_number(person_id)==1) %>% 
+    ungroup() %>% 
+    group_by(person_id, hospital_flag) %>% 
+    slice_max(visit_span_criteria_rank) %>% #Idea here is to only take the visit for a person with the "max rank" either 2 for inside the acute window, or 1 for outside
+    slice_min(visit_start_date) %>% 
+    # mutate(hospitalized_for_covid = ifelse(primary_due_to_covid > 0, 1, 0)) %>% 
+    compute_new(indexes=c("person_id", "visit_start_date"))
+  
+  hosp_tbl %>% 
+    return()
+  
+  
+}
+
+
+
+#' Shell function to get hospitalizations
+#'
+#' @param cohort 
+#'
+#' @return
+#' @export
+#'
+#' @examples
+flag_hospitalizations <- function(cohort){
+  hosp_tbl <- cohort %>%
+    get_hospitalization(days_before = 2, days_after = 7)
+  
+  cohort %>% 
+    left_join(hosp_tbl %>%
+                group_by(person_id) %>% 
+                slice_min(visit_start_date) %>% 
+                select(person_id, hospital_flag, 
+                       hospitalization_visit_date = visit_start_date,
+                       visit_span_criteria_rank
+                ), 
+              by=c("person_id")) %>% 
+    return()
+}
+
+#' Secondary function to get severe hospitalizations that had use of a ventilator 
+#'
+#' @param cohort Must have necessary columns used by the `get_hospitalization()` function
+#'
+#' @return Original cohort table with columns from `get_hospitalization()` and a `hosp_with_vent` binary column
+#' @export
+#'
+#' @examples
+get_severe_hospitalizations <- function(cohort) {
+  
+  cohort_hosp_flags <- cohort %>% 
+    select(-hospital_flag) %>% 
+    get_hospitalization(days_before = 2, days_after = 7) %>%
+    select(hospital_visit_date = visit_start_date) %>% 
+    compute_new(indexes=c("person_id"))
+  
+  cohort_with_hosp_flag <-
+    cohort %>% 
+    select(-hospital_flag) %>% 
+    left_join(cohort_hosp_flags, by=c("person_id")) %>% 
+    mutate(hospital_flag = ifelse(is.na(hospital_flag), 0, hospital_flag))
+  
+  proc_tbl <- cdm_tbl("procedure_occurrence")
+  mech_vent <- load_codeset("mech_vent_px_codeset_enriched")
+  
+  vent_procs <- mech_vent %>% 
+    left_join(proc_tbl %>% select(person_id,
+                                  procedure_concept_id,
+                                  procedure_date,
+                                  procedure_occurrence_id,
+                                  visit_occurrence_id), 
+              by=c("concept_id"="procedure_concept_id")) %>% 
+    inner_join(cohort_with_hosp_flag, by=c("person_id")) %>% 
+    compute_new(indexes=c("person_id"))
+  
+  earliest_vent_date_tbl <- vent_procs %>% 
+    filter(procedure_date >= hospital_visit_date - days(2),
+           procedure_date <= hospital_visit_date + days(7)) %>% 
+    group_by(person_id, procedure_date) %>% 
+    filter(row_number(person_id)==1) %>% 
+    ungroup() %>% 
+    group_by(person_id) %>% 
+    slice_min(procedure_date) %>% 
+    mutate(earliest_proc_vent_date = procedure_date) %>% 
+    mutate(hosp_with_vent = 1) %>% 
+    select(person_id, earliest_proc_vent_date, hosp_with_vent) %>% 
+    compute_new(indexes=c("person_id"))
+  
+  cohort %>% 
+    left_join(earliest_vent_date_tbl, by=c("person_id")) %>% 
+    return()
+  
+}
+
 
 
 

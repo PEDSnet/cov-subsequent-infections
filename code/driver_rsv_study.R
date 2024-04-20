@@ -166,22 +166,141 @@ config_append('extra_packages', c())
   ## Generate outcomes
   results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
     generate_output_outcome_lists(outcome = "rsv",
-                                  outcome_start_date = postacute_min_start_date,
+                                  outcome_start_date = cohort_entry_start_date,
                                   outcome_end_date = postacute_max_end_date,
                                   output_tbl_name = paste0(cohort_1_label, "_rsv_outcomes"))
+  
+  results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
+    generate_output_outcome_lists(outcome = "respiratory",
+                                  outcome_start_date = cohort_entry_start_date,
+                                  outcome_end_date = postacute_max_end_date,
+                                  output_tbl_name = paste0(cohort_1_label, "_respiratory_outcomes"))
   
   
   ## Step 3
   ## Generate additional covariates
   
+  
+  ### Utilization here
+  ## TODO continue this on 3/26
+  cohort_with_util_info <- results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
+    select(-visit_type_outpatient, -visit_type_admin_other_telemed, -visit_type_inpatient_or_ed) %>% # remove previous bad versions 
+    flag_utilization_level(cdm_tbl("visit_occurrence"), 365, cohort_1_label)
+  
+  cohort_with_util_info %>% 
+    select(person_id, visit_type_inpatient, visit_type_outpatient, visit_type_ed, visit_type_other) %>% 
+    output_tbl(paste0(cohort_1_label, "_visit_quantile_cat"))
+  
+  ## Hospitalization
+  cohort_with_hosp_info <- results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
+    mutate(index_date = ce_date) %>% 
+    flag_hospitalizations()
+  
+  cohort_with_hosp_info %>% 
+    select(person_id, hospital_flag, hospitalization_visit_date, visit_span_criteria_rank ) %>% 
+    output_tbl(paste0(cohort_1_label, "_hospitalization"))
+  
+  ## Ventilator use
+  cohort_with_vent_info <- cohort_with_hosp_info %>% 
+    # mutate(index_date = ce_date) %>% 
+    get_severe_hospitalizations()
+  
+  cohort_with_vent_info %>% 
+    select(person_id, earliest_proc_vent_date, hosp_with_vent ) %>% 
+    output_tbl(paste0(cohort_1_label, "_severe_ventilator_use"))
+  
+  ### PMCA 
+  ##############################################################################
+  message('Steps 1 and 2: Calculate PMCA lookup table and summary table for all sites in cohort')
+  
+  #' The specified cohort should have person_id and observation_date; a 3-year lookback from
+  #' the observation date is applied
+  pmca_lookup <- produce_pmca_lookup(cohort= results_tbl(paste0(cohort_1_label, "_cohort_demo")) )
+  
+  pmca_summary <- compute_pmca_summary(pmca_lookup_tbl = pmca_lookup)
+  
+  # output_tbl(rslt$pmca_summary,
+  #            'pmca_summary',
+  #            indexes=c('person_id'))
+  
+  ##############################################################################
+  message('Step 3: Apply most conservative PMCA algorithm and get PMCA flags')
+  
+  pmca_category <- compute_pmca_cats_cons(pmca_summary_tbl = pmca_summary,
+                                               cohort_tbl = results_tbl(paste0(cohort_1_label, "_cohort_demo"))  %>% 
+                                            inner_join(cdm_tbl("person") %>% select(person_id, site), by="person_id"))
+  
+  # output_tbl(rslt$pmca_category,
+  #            'pmca_category',
+  #            indexes=c('person_id'))
+  
+  ##############################################################################
+  message('Steps 4 and 5: Compute PMCA complex chronic/progressive/malignant and body system flags')
+  
+  #' Compute flags, including:
+  #' progressive_ct
+  #' malignancy_ct
+  #' complex_chronic, chronic, non_complex_chronic
+  #' n_body_systems
+  pmca_all_flags <- pmca_all_flags(pmca_summary_tbl = pmca_summary,
+                                        cohort_tbl = results_tbl(paste0(cohort_1_label, "_cohort_demo")) ,
+                                        pmca_category = pmca_category)
+  
+  #' Compute flags for any indication of each PMCA body system in the prior 3 years
+  pmca_bs_flags <- flag_pmca_bs(cohort_tbl= results_tbl(paste0(cohort_1_label, "_cohort_demo")) ,
+                                     pmca_summary=pmca_summary)
+  
+  ##############################################################################
+  message('Define PMCA flags in your cohort')
+  #' Note: the complex_chronic, non_complex_chronic, and chronic flags are oddly defined:
+  #' complex_chronic: flags patients who are identified as complex AND chronic patients
+  #' chronic: flags patients who are identified as chronic patients (but not complex)
+  #' non_complex_chronic: flags patients who are neither "complex chronic" nor "chronic" patients
+  #' (patients who do not have any indication of chronic or complex chronic disease)
+  
+  cohort_pmca_flags <- results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>%
+    select('person_id') %>% 
+    left_join(pmca_all_flags %>%
+                select(-site), by='person_id') %>%
+    left_join(pmca_bs_flags, by='person_id') %>%
+    mutate(complex_chronic_flag = case_when(complex_chronic == 1L ~ 'complex_chronic',
+                                            non_complex_chronic == 1L ~ 'not_chronic_or_complex_chronic',
+                                            chronic == 1L ~ 'chronic',
+                                            TRUE ~ 'not_chronic_or_complex_chronic')) %>%
+    mutate(progressive_flag = case_when(progressive_ct > 0L ~ 'yes',
+                                        TRUE ~ 'no'),
+           malignancy_flag = case_when(malignancy_ct > 0L ~ 'yes',
+                                       TRUE ~ 'no')) %>%
+    mutate(n_body_systems=case_when(is.na(n_body_systems) ~ 0L,
+                                    TRUE ~ n_body_systems)) %>%
+    mutate(nbs=case_when(
+      n_body_systems>=5L~"05-17 body systems",
+      n_body_systems>=3L~"03-04 body systems",
+      n_body_systems==2L~"02 body systems",
+      n_body_systems==1L~"01 body system",
+      n_body_systems==0L~"No body systems")) %>% 
+    compute_new()
+  
+  cohort_pmca_flags %>% 
+    output_tbl(paste0(cohort_1_label, "_pmca_info"))
+  
+  # output_tbl(rslt$pmca_bs_flags,
+  #            'pmca_bs_flags_full',
+  #            indexes=list('person_id'))
+  
+  
   ## Step 4
   ## Data transformations
-  
   
   ## Output final analytic dataset at end, see next driver for modeling and/or reporting analytics!
   ## TODO have this be a running / evolving piece of code that generates the "final analytic dataset" that is ready to be plugged in to different models
   results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
+    select(-visit_type_outpatient, -visit_type_admin_other_telemed, -visit_type_inpatient_or_ed) %>% # remove previous bad versions 
     generate_analytic_dataset(rsv_outcomes = results_tbl(paste0(cohort_1_label, "_rsv_outcomes")),
+                              util_quantiles_tbl = results_tbl(paste0(cohort_1_label, "_visit_quantile_cat")),
+                              hospitalization_tbl = results_tbl(paste0(cohort_1_label, "_hospitalization")),
+                              ventilator_use_tbl = results_tbl(paste0(cohort_1_label, "_severe_ventilator_use")),
+                              pmca_tbl = results_tbl(paste0(cohort_1_label, "_pmca_info")),
                               output_tbl_name = paste0(cohort_1_label, "_analytic_dataset"))
   
   message('Done.')
