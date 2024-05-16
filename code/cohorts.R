@@ -287,6 +287,104 @@ build_comparison_cohorts_rsv_study <- function(cohort_tbl, odr_tbl, ce_start_dat
   
 }
 
+### This will be the primary use function
+build_comparison_cohorts_resp_study <- function(cohort_tbl, odr_tbl, ce_start_date, ce_end_date) {
+  # Logic in here to decide what to do with kids who had both within the study period, or who had one or the other or none
+  relevant_infections <-
+    cohort_tbl %>% 
+    get_covid_evidence(odr_tbl, ce_start_date, ce_end_date) %>% 
+    get_influenza_evidence(ce_start_date, ce_end_date) %>% 
+    compute_new(indexes=c("person_id"))
+  
+  ## Then relevant infections should have the earliest infection for each person, in each category of comparison cohort
+  ## Next step, apply exclusion rules
+  ## Apply rules:
+  ## If one of the other categories has happened 12-6 months before index period, count as variable
+  ## IF one of the other categories has happened within 6 months of index, exclude
+  ## If one of the other categories has happened within 6 months following index, exclude
+  ## If other category is after post-acute period, ok
+  ## new columns: comparison_cohort, prior_infection_type, exclude (1/0), exclude_reason
+  ## classify phases instead (will make logic easier later)
+  # relevant_infections <- data.frame(person_id = c("a", "b", "c", "d", "e", "f"), 
+  #                                   covid_date = c(as.Date("2022-04-01"), as.Date("2022-04-05"), NA, as.Date("2021-09-01"), as.Date("2022-04-01"), NA), 
+  #                                   resp_date = c(as.Date("2022-06-01"), NA, as.Date("2022-07-01"), as.Date("2022-03-02"), as.Date("2022-04-01"), NA), 
+  #                                   flu_date = c(as.Date("2024-01-01"), as.Date("2022-08-01"), NA, NA, NA, NA),
+  #                                   birth_date = c(as.Date("2018-03-01"), as.Date("2009-01-01"), as.Date("2015-01-01"),as.Date("2016-01-01"),as.Date("2008-01-01"),as.Date("2021-01-01")))
+  # 
+  infections_phases_categorized <-
+    relevant_infections %>% 
+    pivot_longer(cols = c("covid_date", "flu_date"), names_to = "event", values_to = "event_date") %>% 
+    mutate(event_in_ce_window = ifelse(event_date >= ce_start_date & event_date < ce_end_date, 1, 0)) %>% 
+    select(person_id, cov_test_date, covid_dx_date, flu_dx_date, earliest_flu_test, event, event_date,
+           event_in_ce_window) %>% 
+    filter(!is.na(event_date)) %>% 
+    mutate(lab_confirmed = case_when(
+      event=="covid_date" & !is.na(cov_test_date) ~ 1,
+      event=="flu_date" & !is.na(earliest_flu_test) ~ 1,
+      TRUE ~ 0
+    )) %>% 
+    compute_new(indexes=c("person_id"))
+  
+  ## Now need to identify the earliest index event in the window
+  ## Anyone with NO evidence of all 3 will be removed during this step because they have no minimum
+  ## New step: earliest index date, test confirmed, and earliest index date, any (I guess it's just, what is the earliest thing, and if its test confirmed or not)
+  earliest_index_event <-
+    infections_phases_categorized %>% 
+    filter(event_in_ce_window == 1) %>% 
+    group_by(person_id) %>% 
+    slice_min(event_date, with_ties = FALSE) %>% 
+    ungroup() %>% 
+    select(person_id, ce_date = event_date, ce_event = event, lab_confirmed) %>%  
+    compute_new(indexes=c("person_id"))
+  
+  infections_phases_relative <-
+    earliest_index_event %>% 
+    left_join(relevant_infections, by="person_id") %>% 
+    mutate(covid_phase = case_when(
+      is.na(covid_date) ~ "none",
+      ce_event == "covid_date" ~ "index",
+      covid_date < as.Date(ce_date - months(6)) ~ "prior",
+      covid_date < ce_date ~ "pre-acute",
+      covid_date < as.Date(ce_date + months(1)) ~ "acute",
+      covid_date < as.Date(ce_date + months(6)) ~ "post-acute",
+      covid_date >= as.Date(ce_date + months(6)) ~ "future"
+    )) %>% 
+    mutate(flu_phase = case_when(
+      is.na(flu_date) ~ "none",
+      ce_event == "flu_date" ~ "index",
+      flu_date < as.Date(ce_date - months(6)) ~ "prior",
+      flu_date < ce_date ~ "pre-acute",
+      flu_date < as.Date(ce_date + months(1)) ~ "acute",
+      flu_date < as.Date(ce_date + months(6)) ~ "post-acute",
+      flu_date >= as.Date(ce_date + months(6)) ~ "future"
+    )) 
+  
+  
+  exclude_reasons <-
+    infections_phases_relative %>% 
+    mutate(exclude = case_when(
+      ce_event != "covid_date" & 
+        covid_phase %in% c("prior","pre-acute", "acute", "post-acute") ~ 1,
+      ce_event != "flu_date" & 
+        flu_phase %in% c("pre-acute", "acute", "post-acute") ~ 1,
+      TRUE ~ 0
+    )) %>% 
+    mutate(exclude_reason = case_when(
+      exclude == 2 ~ "Has respiratory dx within pre-acute, acute, or post-acute period",
+      exclude == 0 ~ "none",
+      TRUE ~ paste0("Had COVID: ", covid_phase, ", FLU: ", flu_phase)
+    )) 
+  
+  exclude_reasons %>% 
+    mutate(sub_cohort = case_when(
+      ce_event == "covid_date" ~ "COVID",
+      ce_event == "flu_date" ~ "Influenza")) %>% 
+    mutate(age_years_on_ce_date = as.numeric(ce_date-birth_date)/365.25) %>% 
+    compute_new(indexes=c("person_id")) %>% 
+    return()
+  
+}
+
 build_comparison_cohorts_rsv_study_sensitivity <- function(cohort_tbl, odr_tbl, ce_start_date, ce_end_date) {
   # Logic in here to decide what to do with kids who had both within the study period, or who had one or the other or none
   # TODO change this to be the same function, regular code, with just a flag at the end for test-only or not, so the cohort can actually just be filtered for evidence
@@ -425,7 +523,7 @@ flag_utilization_level <- function(cohort, visit_tbl, lookback_days, tbl_count_l
     compute_new()
   
   visit_lookback_counts %>% 
-    output_tbl(paste0(tbl_counts_label, "_visit_lookback_counts"))
+    output_tbl(paste0(tbl_count_label, "_visit_lookback_counts"))
   
   ## Use the table from above to compute proper quantile categories
   ## Ideal: high, normal, low/none
@@ -660,12 +758,60 @@ generate_output_outcome_lists <- function(cohort, outcome, outcome_start_date, o
 }
 
 generate_analytic_dataset <- function(cohort_demo, 
-                                      rsv_outcomes, 
+                                      rsv_outcomes,
+                                      respiratory_outcomes,
                                       util_quantiles_tbl, 
                                       hospitalization_tbl, 
                                       ventilator_use_tbl,
                                       pmca_tbl,
                                       output_tbl_name) {
+  
+  # Note: analytic dataset should keep track of any respiratory outcome, regardless of days since, but then analysis should be doing the exclusion and filtering.
+  # This chunk records the first infection for each patient -- the issue is, we need there to be first non-influenza and first influenza-related infection, sincethat's one
+  # of our comparison index groups. Maybe we should completely rule out influenza, and so that this is a first-ever non-influenza infection
+  # Perhaps we should also allow a buffer period = not necessairly no dx's between 0 and 30 days, but perhaps like, 7 and 30 days? To help with follow up criteria. There just needs to be a distinction
+  # Count total number of new dx's between 10 and 30 days and need that to be 0 
+  # Ok, now trying by filtering the infections looked at from 7 days past the ce date, 
+  # Should probably do this in a data informed way, though
+  first_respiratory_outcome <- respiratory_outcomes %>% 
+    select(person_id, concept_name, condition_start_date, rsv_related, influenza_related) %>% 
+    filter(is.na(influenza_related), is.na(rsv_related)) %>% 
+    inner_join(cohort_demo %>% select(person_id, ce_date, sub_cohort), by="person_id") %>% 
+    filter(condition_start_date < ce_date + days(180)) %>%
+    filter(condition_start_date >= ce_date + days(7)) %>% 
+    group_by(person_id, concept_name, condition_start_date) %>% 
+    filter(row_number()==1) %>% 
+    ungroup() %>% 
+    group_by(person_id) %>% 
+    mutate(earliest_resp_outcome = min(condition_start_date)) %>% 
+    mutate(resp_dx_within_30_days = ifelse(as.numeric(earliest_resp_outcome - ce_date) < 30,
+                                           1, 0)) %>% 
+    ungroup() %>% 
+    group_by(person_id) %>% 
+    slice_min(condition_start_date, with_ties = FALSE) %>% 
+    ungroup() %>% 
+    mutate(days_from_index_to_first_resp = as.numeric(condition_start_date - ce_date)) %>%
+    select(person_id, sub_cohort, first_resp_concept = concept_name, first_resp_dx_date = condition_start_date,
+           resp_dx_within_30_days, days_from_index_to_first_resp) %>% 
+    compute_new()
+  
+  first_respiratory_outcome_after_30days <- respiratory_outcomes %>% 
+    select(person_id, concept_name, condition_start_date, rsv_related, influenza_related) %>% 
+    filter(is.na(influenza_related), is.na(rsv_related)) %>% 
+    inner_join(cohort_demo %>% select(person_id, ce_date, sub_cohort), by="person_id") %>% 
+    filter(condition_start_date < ce_date + days(180)) %>%
+    filter(condition_start_date >= ce_date + days(30)) %>%
+    group_by(person_id, concept_name, condition_start_date) %>% 
+    filter(row_number()==1) %>% 
+    ungroup() %>% 
+    group_by(person_id) %>% 
+    slice_min(condition_start_date, with_ties = FALSE) %>% 
+    ungroup() %>% 
+    mutate(days_from_index_to_first30d_resp = as.numeric(condition_start_date - ce_date)) %>%
+    select(person_id, sub_cohort, first30d_resp_concept = concept_name, first30d_resp_date = condition_start_date,
+           days_from_index_to_first30d_resp) %>% 
+    compute_new()
+  
   
   cohort_with_rsv_outcomes <-
     cohort_demo %>% 
@@ -673,6 +819,10 @@ generate_analytic_dataset <- function(cohort_demo,
     left_join(hospitalization_tbl, by="person_id") %>% 
     left_join(ventilator_use_tbl, by="person_id") %>% 
     left_join(pmca_tbl, by="person_id") %>% 
+    left_join(first_respiratory_outcome, by=c("person_id", "sub_cohort")) %>%
+    left_join(first_respiratory_outcome_after_30days, by=c("person_id", "sub_cohort")) %>%
+    mutate(outcome_resp30d = case_when(days_from_index_to_first30d_resp >= 30 & days_from_index_to_first30d_resp < 180 ~ 1,
+                                       TRUE ~ 0)) %>% 
     left_join(rsv_outcomes, by="person_id") %>% 
     mutate(days_from_index = as.numeric(rsv_evidence_date - ce_date)) %>% 
     mutate(days_from_index_to_rsv = days_from_index) %>% 
@@ -685,18 +835,18 @@ generate_analytic_dataset <- function(cohort_demo,
       TRUE ~ "No evidence of RSV"
     )) %>% 
     mutate(outcome_rsv_30_to_180 = case_when(days_from_index >= 30 & rsv_occurrence_period == "post acute (15-180 days after index)" ~ 1,
-                                                TRUE ~ 0)) %>% 
+                                             TRUE ~ 0)) %>% 
     mutate(outcome_rsv_15_to_180 = case_when(days_from_index >= 15 & rsv_occurrence_period == "post acute (15-180 days after index)" ~ 1,
-                                                TRUE ~ 0)) %>% 
+                                             TRUE ~ 0)) %>% 
     mutate(outcome_rsv_15_to_300 = case_when(rsv_occurrence_period == "post acute (15-180 days after index)" ~ 1,
-                                            rsv_occurrence_period == "Future RSV (180-300 days)" ~ 1,
-                                                TRUE ~ 0)) %>% 
+                                             rsv_occurrence_period == "Future RSV (180-300 days)" ~ 1,
+                                             TRUE ~ 0)) %>% 
     mutate(outcome_rsv_1_to_60 = case_when(days_from_index > 0 & days_from_index < 60 ~ 1,
                                            TRUE ~ 0)) %>% 
     mutate(outcome_rsv_0_to_60 = case_when(days_from_index >= 0 & days_from_index < 60 ~ 1,
                                            TRUE ~ 0)) %>% 
     mutate(outcome_rsv_same_day = case_when(days_from_index == 0 ~ 1,
-                                           TRUE ~ 0)) %>% 
+                                            TRUE ~ 0)) %>% 
     mutate(util_inpatient = case_when(visit_type_inpatient == "no_visits" ~ "no_visits",
                                       visit_type_inpatient == "visits_3_or_more" ~ "high_utilizer",
                                       visit_type_inpatient == "visits_less_than_3" ~ "low_utilizer")) %>% 
@@ -719,6 +869,115 @@ generate_analytic_dataset <- function(cohort_demo,
                days_from_index_to_rsv < 0 ~ 1,
                TRUE ~ 0
              )) %>% 
+    output_tbl(output_tbl_name)
+}
+
+generate_analytic_dataset_resp <- function(cohort_demo, 
+                                      respiratory_outcomes,
+                                      any_infection_outcomes,
+                                      util_quantiles_tbl, 
+                                      hospitalization_tbl, 
+                                      ventilator_use_tbl,
+                                      pmca_tbl,
+                                      output_tbl_name) {
+  
+  # Note: analytic dataset should keep track of any respiratory outcome, regardless of days since, but then analysis should be doing the exclusion and filtering.
+  # This chunk records the first infection for each patient -- the issue is, we need there to be first non-influenza and first influenza-related infection, sincethat's one
+  # of our comparison index groups. Maybe we should completely rule out influenza, and so that this is a first-ever non-influenza infection
+  # Perhaps we should also allow a buffer period = not necessairly no dx's between 0 and 30 days, but perhaps like, 7 and 30 days? To help with follow up criteria. There just needs to be a distinction
+  # Count total number of new dx's between 10 and 30 days and need that to be 0 
+  # Ok, now trying by filtering the infections looked at from 7 days past the ce date, 
+  # Should probably do this in a data informed way, though
+  first_respiratory_outcome <- respiratory_outcomes %>% 
+    select(person_id, concept_name, condition_start_date, rsv_related, influenza_related) %>% 
+    filter(is.na(influenza_related), is.na(rsv_related)) %>% 
+    inner_join(cohort_demo %>% select(person_id, ce_date, sub_cohort), by="person_id") %>% 
+    filter(condition_start_date < ce_date + days(180)) %>%
+    filter(condition_start_date >= ce_date + days(7)) %>% 
+    group_by(person_id, concept_name, condition_start_date) %>% 
+    filter(row_number()==1) %>% 
+    ungroup() %>% 
+    group_by(person_id) %>% 
+    mutate(earliest_resp_outcome = min(condition_start_date)) %>% 
+    mutate(resp_dx_within_30_days = ifelse(as.numeric(earliest_resp_outcome - ce_date) < 30,
+                                           1, 0)) %>% 
+    ungroup() %>% 
+    group_by(person_id) %>% 
+    slice_min(condition_start_date, with_ties = FALSE) %>% 
+    ungroup() %>% 
+    mutate(days_from_index_to_first_resp = as.numeric(condition_start_date - ce_date)) %>%
+    select(person_id, sub_cohort, first_resp_concept = concept_name, first_resp_dx_date = condition_start_date,
+           resp_dx_within_30_days, days_from_index_to_first_resp) %>% 
+    compute_new()
+  
+  first_respiratory_outcome_after_30days <- respiratory_outcomes %>% 
+    select(person_id, concept_name, condition_start_date, rsv_related, influenza_related) %>% 
+    # filter(is.na(influenza_related), is.na(rsv_related)) %>%
+    inner_join(cohort_demo %>% select(person_id, ce_date, sub_cohort), by="person_id") %>% 
+    filter(condition_start_date < ce_date + days(180)) %>%
+    filter(condition_start_date >= ce_date + days(30)) %>%
+    group_by(person_id, concept_name, condition_start_date) %>% 
+    filter(row_number()==1) %>% 
+    ungroup() %>% 
+    group_by(person_id) %>% 
+    slice_min(condition_start_date, with_ties = FALSE) %>% 
+    ungroup() %>% 
+    mutate(days_from_index_to_first30d_resp = as.numeric(condition_start_date - ce_date)) %>%
+    select(person_id, sub_cohort, first30d_resp_concept = concept_name, first30d_resp_date = condition_start_date,
+           days_from_index_to_first30d_resp, resp_outcome_flu_related = influenza_related, resp_outcome_rsv_related = rsv_related) %>% 
+    compute_new()
+  
+  first_general_outcome_after_30days <- any_infection_outcomes %>% 
+    select(person_id, concept_name, condition_start_date) %>% 
+    # filter(is.na(influenza_related), is.na(rsv_related)) %>%
+    inner_join(cohort_demo %>% select(person_id, ce_date, sub_cohort), by="person_id") %>% 
+    filter(condition_start_date < ce_date + days(180)) %>%
+    filter(condition_start_date >= ce_date + days(30)) %>%
+    group_by(person_id, concept_name, condition_start_date) %>% 
+    filter(row_number()==1) %>% 
+    ungroup() %>% 
+    group_by(person_id) %>% 
+    slice_min(condition_start_date, with_ties = FALSE) %>% 
+    ungroup() %>% 
+    mutate(days_from_index_to_first30d_general = as.numeric(condition_start_date - ce_date)) %>%
+    select(person_id, sub_cohort, first30d_general_concept = concept_name, first30d_general_date = condition_start_date,
+           days_from_index_to_first30d_general) %>% 
+    compute_new()
+    
+  
+  cohort_with_outcomes <-
+    cohort_demo %>% 
+    left_join(util_quantiles_tbl, by="person_id") %>% 
+    left_join(hospitalization_tbl, by="person_id") %>% 
+    left_join(ventilator_use_tbl, by="person_id") %>% 
+    left_join(pmca_tbl, by="person_id") %>% 
+    # left_join(first_respiratory_outcome, by=c("person_id", "sub_cohort")) %>%
+    left_join(first_respiratory_outcome_after_30days, by=c("person_id", "sub_cohort")) %>%
+    left_join(first_general_outcome_after_30days, by=c("person_id", "sub_cohort")) %>% 
+    mutate(outcome_resp30d = case_when(days_from_index_to_first30d_resp >= 30 & days_from_index_to_first30d_resp < 180 ~ 1,
+                                       TRUE ~ 0)) %>% 
+    mutate(outcome_covid30d = case_when(is.na(covid_date) ~ 0,
+                                        covid_date >= ce_date + days(30) & covid_date < ce_date + days(180) ~ 1,
+                                        TRUE ~ 0)) %>% 
+    mutate(outcome_general30d = case_when(days_from_index_to_first30d_general >= 30 & days_from_index_to_first30d_general < 180 ~ 1,
+                                          TRUE ~0)) %>% 
+    mutate(util_inpatient = case_when(visit_type_inpatient == "no_visits" ~ "no_visits",
+                                      visit_type_inpatient == "visits_3_or_more" ~ "high_utilizer",
+                                      visit_type_inpatient == "visits_less_than_3" ~ "low_utilizer")) %>% 
+    mutate(util_outpatient = case_when(visit_type_outpatient == "no_visits" ~ "no_visits",
+                                       visit_type_outpatient == "visits_less_than_6" ~ "moderate_utilizer",
+                                       visit_type_outpatient == "visits_less_than_3" ~ "low_utilizer",
+                                       TRUE ~ "high_utilizer")) %>% 
+    mutate(util_ed = case_when(visit_type_ed == "no_visits" ~ "no_visits",
+                               visit_type_ed == "visits_less_than_4" ~ "moderate_utilizer",
+                               visit_type_ed == "visits_less_than_2" ~ "low_utilizer",
+                               TRUE ~ "high_utilizer")) %>% 
+    mutate(util_other = case_when(visit_type_other == "no_visits" ~ "no_visits",
+                                  visit_type_other == "visits_less_than_8" ~ "moderate_utilizer",
+                                  visit_type_other == "visits_less_than_3" ~ "low_utilizer",
+                                  TRUE ~ "high_utilizer"))
+  
+  cohort_with_outcomes %>% 
     output_tbl(output_tbl_name)
 }
 

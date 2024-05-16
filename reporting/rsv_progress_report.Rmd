@@ -1,5 +1,5 @@
 ---
-title: "Subsequent Infections - RSV Study Analysis [COVID vs. ARI comparison group] "
+title: "Subsequent Infections - RSV Study Analysis [COVID vs. Influenza comparison group] "
 date: "`r format(Sys.time(), '%m-%d-%y')`"
 output:
   html_document:
@@ -155,8 +155,9 @@ description = "covid_flu_util"
 description = "covid_flu_nonexclude"
 
 description = "covid_flu_comparison"
-description = "covid_ari_comparison"
-comparison_group_string = "Respiratory"
+# description = "covid_ari_comparison"
+# comparison_group_string = "Respiratory"
+comparison_group_string = "Influenza"
 
 cohort_1_label = "rsv_study_cohort"
 
@@ -196,7 +197,7 @@ visit_counts <- results_tbl(paste0(cohort_1_label, "_visit_lookback_counts")) %>
 
 ## Table 1
 
-```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=8, fig.height=6}
   
 # table1(~ sex_cat + race_eth_cat + age_cat_at_ce + 
 #          visit_type_inpatient +
@@ -224,8 +225,35 @@ table1(~ sex_cat + race_eth_cat + age_cat_at_ce +
          # complex_chronic_flag +
          insurance_class
          | sub_cohort, 
-       overall = F,
        data = analytic_dataset_final)
+
+analytic_dataset_final %>% 
+  select(ce_date, rsv_evidence_date, sub_cohort, days_from_index_to_rsv) %>% 
+  filter(sub_cohort != "Respiratory") %>% 
+  filter(!is.na(days_from_index_to_rsv)) %>% 
+  mutate(plot_cohort = case_when(
+    days_from_index_to_rsv==0 & sub_cohort == "COVID" ~ "Cov+RSV",
+    days_from_index_to_rsv==0 & sub_cohort == "Influenza" ~ "Flu+RSV",
+    days_from_index_to_rsv==0 & sub_cohort == "Respiratory" ~ "ARI+RSV",
+    TRUE ~ sub_cohort
+  )) %>% 
+  pivot_longer(cols=c("ce_date", "rsv_evidence_date"), names_to = "Event", values_to = "dates") %>% 
+  ggplot() +
+  # geom_histogram(aes(x=dates, fill = plot_cohort), alpha=0.9) +
+  geom_density(aes(x=dates, fill = plot_cohort, color = plot_cohort), alpha=0.75, position="dodge") +
+  facet_wrap(~Event, scales = "free_y", ncol=1) +
+  # geom_histogram(aes(x=ce_date, fill = sub_cohort, color = "Index infection")) +
+  # geom_histogram(aes(x=rsv_evidence_date, fill = sub_cohort, color = "RSV outcome"), alpha=0.5)+
+  # scale_color_brewer(palette = "Set1") +
+  scale_fill_brewer(palette = "Set1")+
+  scale_color_brewer(palette = "Set1") +
+  # scale_fill_manual(values = wes_palette("FantasticFox1", n=4, type = "continuous")) +
+  # scale_color_manual(values = wes_palette("FantasticFox1", n=4, type = "continuous")) +
+  theme_bw() +
+  theme(legend.position = "top") 
+
+ggsave("results/abstract_fig_1.png", width = 6, height = 4, dpi = 500)
+  
 
 ```
 
@@ -721,6 +749,18 @@ plot_summs(models$model_unweighted_unadjusted,
                            # "Weighted, adjusted for CE weeanalytic_dataset_finalk"), 
            exp = TRUE)
 
+export_summs(models$model_unweighted_unadjusted,
+           models$model_unweighted_adjusted,
+           models$model_weighted_unadjusted,
+           models$model_weighted_adjusted,
+           # models$model_weighted_adjusted_time,
+           model.names = c("Unweighted, unadjusted",
+                           "Unweighted, adjusted",
+                           "Weighted, unadjusted",
+                           "Weighted, adjusted"),
+                           # "Weighted, adjusted for CE weeanalytic_dataset_finalk"), 
+           exp = TRUE)
+
 ```
 
 ### Outcome: RSV within 1-60 days
@@ -788,6 +828,18 @@ plot_summs(models$model_unweighted_unadjusted,
                            # "Weighted, adjusted for CE week"), 
            exp = TRUE)
 
+export_summs(models$model_unweighted_unadjusted,
+           models$model_unweighted_adjusted,
+           models$model_weighted_unadjusted,
+           models$model_weighted_adjusted,
+           # models$model_weighted_adjusted_time,
+           model.names = c("Unweighted, unadjusted",
+                           "Unweighted, adjusted",
+                           "Weighted (LR), unadjusted",
+                           "Weighted (LR), adjusted"),
+                           # "Weighted, adjusted for CE week"), 
+           exp = TRUE)
+
 ```
 
 ### Outcome: RSV within 0-60 days
@@ -830,6 +882,8 @@ models$model_weighted_adjusted <- run_logistic_regression(df = dataset_with_iptw
                                                                                 " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_inpatient + util_outpatient + util_other"),
                                                          weight_method = "lr")
 
+
+
 models$model_weighted_adjusted_time <- run_logistic_regression(df = dataset_with_iptw,
                                                          model_formula = paste0(outcome,
                                                                                 " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_inpatient + util_outpatient + util_other + ce_week_factor"),
@@ -840,6 +894,18 @@ models$model_weighted_adjusted_time <- run_logistic_regression(df = dataset_with
 ```{r, echo = FALSE, warning = FALSE, message = FALSE, fig.width=12, fig.height=6}
 
 plot_summs(models$model_unweighted_unadjusted,
+           models$model_unweighted_adjusted,
+           models$model_weighted_unadjusted,
+           models$model_weighted_adjusted,
+           # models$model_weighted_adjusted_time,
+           model.names = c("Unweighted, unadjusted",
+                           "Unweighted, adjusted",
+                           "Weighted (LR), unadjusted",
+                           "Weighted (LR), adjusted"),
+                           # "Weighted, adjusted for CE week"), 
+           exp = TRUE)
+
+export_summs(models$model_unweighted_unadjusted,
            models$model_unweighted_adjusted,
            models$model_weighted_unadjusted,
            models$model_weighted_adjusted,
@@ -911,6 +977,206 @@ plot_summs(models$model_unweighted_unadjusted,
                            "Unweighted, adjusted",
                            "Weighted (LR), unadjusted",
                            "Weighted (LR), adjusted"),
+                           # "Weighted, adjusted for CE week"), 
+           exp = TRUE)
+
+export_summs(models$model_unweighted_unadjusted,
+           models$model_unweighted_adjusted,
+           models$model_weighted_unadjusted,
+           models$model_weighted_adjusted,
+           # models$model_weighted_adjusted_time,
+           model.names = c("Unweighted, unadjusted",
+                           "Unweighted, adjusted",
+                           "Weighted (LR), unadjusted",
+                           "Weighted (LR), adjusted"),
+                           # "Weighted, adjusted for CE week"), 
+           exp = TRUE)
+
+```
+
+
+### Outcome: Subsequent Respiratory infection within 30-180 days
+
+
+```{r echo = FALSE, output = FALSE, message = FALSE , warning = FALSE}
+
+outcome = "outcome_resp30d"
+comparison_group = comparison_group_string
+
+iptw_flu <- analytic_dataset_final %>%
+  do_iptw(cohort_entry_start_date = cohort_entry_start_date,
+          comparison_cohort = comparison_group,
+          weight_formula = "covid~age_group+sex_cat+race_eth_cat+ce_week_factor",
+          iptw_description = paste0("covid_", comparison_group, "_", outcome))
+
+iptw_flu$love_plot
+
+dataset_with_iptw <- results_tbl( paste0(paste0("covid_", comparison_group, "_", outcome),'_tabc')) %>% 
+  collect()
+
+
+models = list()
+
+models$model_unweighted_unadjusted <- run_logistic_regression(df = dataset_with_iptw,
+                                                       model_formula = paste0(outcome, " ~ covid"),
+                                                       weight_method = "none")
+
+models$model_unweighted_adjusted <- run_logistic_regression(df = dataset_with_iptw,
+                                                         model_formula = paste0(outcome,
+                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_inpatient + util_outpatient + util_other"),
+                                                         weight_method = "none")
+
+models$model_weighted_unadjusted <- run_logistic_regression(df = dataset_with_iptw,
+                                                       model_formula = paste0(outcome, " ~ covid"),
+                                                       weight_method = "lr")
+
+models$model_weighted_adjusted <- run_logistic_regression(df = dataset_with_iptw,
+                                                         model_formula = paste0(outcome,
+                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_inpatient + util_outpatient + util_other"),
+                                                         weight_method = "lr")
+
+models$model_weighted_adjusted_time <- run_logistic_regression(df = dataset_with_iptw,
+                                                         model_formula = paste0(outcome,
+                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_inpatient + util_outpatient + util_other + ce_week_factor"),
+                                                         weight_method = "lr")
+
+```
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE, fig.width=12, fig.height=6}
+
+plot_summs(models$model_unweighted_unadjusted,
+           models$model_unweighted_adjusted,
+           models$model_weighted_unadjusted,
+           models$model_weighted_adjusted,
+           # models$model_weighted_adjusted_time,
+           model.names = c("Unweighted, unadjusted",
+                           "Unweighted, adjusted",
+                           "Weighted (LR), unadjusted",
+                           "Weighted (LR), adjusted"),
+                           # "Weighted, adjusted for CE week"), 
+           exp = TRUE)
+
+export_summs(models$model_unweighted_unadjusted,
+           models$model_unweighted_adjusted,
+           models$model_weighted_unadjusted,
+           models$model_weighted_adjusted,
+           # models$model_weighted_adjusted_time,
+           model.names = c("Unweighted, unadjusted",
+                           "Unweighted, adjusted",
+                           "Weighted (LR), unadjusted",
+                           "Weighted (LR), adjusted"),
+                           # "Weighted, adjusted for CE week"), 
+           exp = TRUE)
+
+```
+
+### Figure for paper
+
+Comparing multiple different outcome models in same figure?
+
+Models to compare: 
+Outcome: 15-180 RSV, 1-60 RSV, 0-60 RSV
+Adjustments: None, weighted/adjusted
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE, fig.width=12, fig.height=6}
+
+
+models = list()
+
+outcome_0_60 = "outcome_rsv_0_to_60"
+comparison_group = comparison_group_string
+
+iptw_0_60 <- analytic_dataset_final %>%
+  do_iptw(cohort_entry_start_date = cohort_entry_start_date,
+          comparison_cohort = comparison_group,
+          weight_formula = "covid~age_group+sex_cat+race_eth_cat+ce_week_factor",
+          iptw_description = paste0("covid_", comparison_group, "_", outcome_0_60))
+
+df_0_60 <- results_tbl( paste0(paste0("covid_", comparison_group, "_", outcome_0_60),'_tabc')) %>% 
+  collect()
+
+models$unw_unadj_0_to_60 <- run_logistic_regression(df = df_0_60,
+                                                       model_formula = paste0(outcome_0_60, " ~ covid"),
+                                                       weight_method = "none")
+
+models$w_adj_0_to_60 <- run_logistic_regression(df = df_0_60,
+                                                         model_formula = paste0(outcome_0_60,
+                                                                                " ~ covid + age_group + hospitalized_at_index + util_inpatient"),
+                                                         weight_method = "lr")
+
+###
+outcome_1_60 = "outcome_rsv_1_to_60"
+comparison_group = comparison_group_string
+
+iptw_1_60 <- analytic_dataset_final %>%
+  do_iptw(cohort_entry_start_date = cohort_entry_start_date,
+          comparison_cohort = comparison_group,
+          weight_formula = "covid~age_group+sex_cat+race_eth_cat+ce_week_factor",
+          iptw_description = paste0("covid_", comparison_group, "_", outcome_1_60))
+
+df_1_60 <- results_tbl( paste0(paste0("covid_", comparison_group, "_", outcome_1_60),'_tabc')) %>% 
+  collect()
+
+models$unw_unadj_1_to_60 <- run_logistic_regression(df = df_1_60,
+                                                       model_formula = paste0(outcome_1_60, " ~ covid"),
+                                                       weight_method = "none")
+
+models$w_adj_1_to_60 <- run_logistic_regression(df = df_1_60,
+                                                         model_formula = paste0(outcome_1_60,
+                                                                                " ~ covid + age_group + hospitalized_at_index + util_inpatient"),
+                                                         weight_method = "lr")
+
+##
+outcome_15_180 = "outcome_rsv_15_to_180"
+comparison_group = comparison_group_string
+
+iptw_15_180 <- analytic_dataset_final %>%
+  do_iptw(cohort_entry_start_date = cohort_entry_start_date,
+          comparison_cohort = comparison_group,
+          weight_formula = "covid~age_group+sex_cat+race_eth_cat+ce_week_factor",
+          iptw_description = paste0("covid_", comparison_group, "_", outcome_15_180))
+
+df_15_180 <- results_tbl( paste0(paste0("covid_", comparison_group, "_", outcome_15_180),'_tabc')) %>% 
+  collect()
+
+models$unw_unadj_15_to_180 <- run_logistic_regression(df = df_15_180,
+                                                       model_formula = paste0(outcome_15_180, " ~ covid"),
+                                                       weight_method = "none")
+
+models$w_adj_15_to_180 <- run_logistic_regression(df = df_15_180,
+                                                         model_formula = paste0(outcome_15_180,
+                                                                                " ~ covid + age_group + hospitalized_at_index + util_inpatient"),
+                                                         weight_method = "lr")
+
+
+plot_summs(models$unw_unadj_0_to_60,
+           models$w_adj_0_to_60,
+           models$unw_unadj_1_to_60,
+           models$w_adj_1_to_60,
+           models$unw_unadj_15_to_180,
+           models$w_adj_15_to_180,
+           model.names = c("RSV 0-60d: Unweighted, unadjusted",
+                           "RSV 0-60d: Weighted, adjusted",
+                           "RSV 1-60d: Unweighted, unadjusted",
+                           "RSV 1-60d: Weighted, adjusted",
+                           "RSV 15-180d: Unweighted, unadjusted",
+                           "RSV 15-180d: Weighted, adjusted"),
+                           # "Weighted, adjusted for CE week"), 
+           exp = TRUE)
+
+
+export_summs(models$unw_unadj_0_to_60,
+           models$w_adj_0_to_60,
+           models$unw_unadj_1_to_60,
+           models$w_adj_1_to_60,
+           models$unw_unadj_15_to_180,
+           models$w_adj_15_to_180,
+           model.names = c("RSV 0-60d: Unweighted, unadjusted",
+                           "RSV 0-60d: Weighted, adjusted",
+                           "RSV 1-60d: Unweighted, unadjusted",
+                           "RSV 1-60d: Weighted, adjusted",
+                           "RSV 15-180d: Unweighted, unadjusted",
+                           "RSV 15-180d: Weighted, adjusted"),
                            # "Weighted, adjusted for CE week"), 
            exp = TRUE)
 
@@ -1175,6 +1441,32 @@ dataset_with_iptw %>%
   filter(same_day_rsv == 1) %>% 
   ggplot() +
   geom_bar(aes(x=ce_week_days_numeric, y=prop_with_rsv_day_0, fill = sub_cohort), stat="identity", position="dodge")
+
+```
+
+
+Additional metrics for the abstract:
+
+```{r}
+analytic_dataset_final %>% 
+  group_by(outcome_rsv_0_to_60, outcome_rsv_same_day, sub_cohort) %>% 
+  summarise(n = n_distinct(person_id)) %>% 
+  ungroup() %>% 
+  group_by(sub_cohort) %>% 
+  mutate(total = sum(n)) %>% 
+  mutate(p = n/total) %>% 
+  mutate(pct = paste0(as.character(round(p*100, 2)), " %")) %>% 
+  prettify_kable()
+
+analytic_dataset_final %>% 
+  group_by(outcome_rsv_0_to_60, sub_cohort) %>% 
+  summarise(n = n_distinct(person_id)) %>% 
+  ungroup() %>% 
+  group_by(sub_cohort) %>% 
+  mutate(total = sum(n)) %>% 
+  mutate(p = n/total) %>% 
+  mutate(pct = paste0(as.character(round(p*100, 2)), " %")) %>% 
+  prettify_kable()
 
 ```
 

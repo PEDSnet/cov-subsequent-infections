@@ -31,14 +31,15 @@ config_append('extra_packages', c())
   ## Generate the 3 comparison cohorts
   ## Special inclusion/exclusion criteria for overlap in cohorts
   
+  ## Can we use the same cohorts for the next analysis, just change the preclusion criteria and add additional outcomes?
   ###### Anchor dates for conditions
-  postacute_min_start_date = as.Date("2022-04-01")
-  postacute_max_end_date = as.Date("2023-01-01")
+  postacute_min_start_date = as.Date("2021-07-01")
+  postacute_max_end_date = as.Date("2023-03-01")
   
-  cohort_entry_start_date = as.Date("2022-03-01")
-  cohort_entry_end_date = as.Date("2022-07-01")
-
-  cohort_1_label = "rsv_study_cohort"
+  cohort_entry_start_date = as.Date("2021-06-01")
+  cohort_entry_end_date = as.Date("2023-02-01")
+  
+  cohort_1_label = "resp_study_cohort"
   # cohort_1_label = "sample_pats"
   
   # odr <- cdm_tbl("observation_derivation_recover") %>% # Actually, need observations older than this, in order to get pre-index criteria
@@ -47,22 +48,22 @@ config_append('extra_packages', c())
   
   ## Easier way to do this is just select patients who have a ce_end_date - date of birth < 6 
   rslt$pats_under_age_6 <- pats_with_visit_under_age(cdm_tbl("person"),
-                                                        cdm_tbl("visit_occurrence"), 
-                                                        cohort_entry_start_date, 
-                                                        cohort_entry_end_date, age_limit_years_rough = 6) %>% 
+                                                     cdm_tbl("visit_occurrence"), 
+                                                     cohort_entry_start_date, 
+                                                     cohort_entry_end_date, age_limit_years_rough = 6) %>% 
     compute_new(indexes=c("person_id"))
   
   append_sum(cohort = 'Patients under 6 years old with at least 1 visit during CE period',
              persons = distinct_ct(rslt$pats_under_age_6))
   
-  sample_pats_under_6 <- rslt$pats_under_age_6 %>% 
-    slice_sample(n=3000) %>% 
-    compute_new(indexes=c("person_id"))
-  
-  sample_pats_under_6 %>% output_tbl("pat_sample_03_05")
+  # sample_pats_under_6 <- rslt$pats_under_age_6 %>% 
+  #   slice_sample(n=3000) %>% 
+  #   compute_new(indexes=c("person_id"))
+  # 
+  # sample_pats_under_6 %>% output_tbl("pat_sample_03_05")
   
   rslt$triple_cohort <- rslt$pats_under_age_6 %>% 
-    build_comparison_cohorts_rsv_study(odr_tbl = cdm_tbl("observation_derivation_recover"), # Should probably keep track of the inclusion concept code
+    build_comparison_cohorts_resp_study(odr_tbl = cdm_tbl("observation_derivation_recover"), # Should probably keep track of the inclusion concept code
                                        ce_start_date = cohort_entry_start_date, 
                                        ce_end_date = cohort_entry_end_date) %>% 
     compute_new(indexes=c("person_id")) %>% 
@@ -71,7 +72,7 @@ config_append('extra_packages', c())
   
   ## TODO add to attrition step
   ## TODO can filter by lab_confirmed flag or not
-  append_sum(cohort = 'Had at least 1 of COVID, influenza, and/or other respiratory infection event during CE period',
+  append_sum(cohort = 'Had at least 1 of COVID, influenza infection event during CE period',
              persons = distinct_ct(rslt$triple_cohort))
   
   append_sum(cohort = 'Had COVID during CE period',
@@ -85,13 +86,7 @@ config_append('extra_packages', c())
                                      filter(!is.na(flu_date),
                                             flu_date >= cohort_entry_start_date,
                                             flu_date < cohort_entry_end_date)))
-  
-  append_sum(cohort = 'Had other respiratory infection during CE period',
-             persons = distinct_ct(rslt$triple_cohort %>% 
-                                     filter(!is.na(resp_date),
-                                            resp_date >= cohort_entry_start_date,
-                                            resp_date < cohort_entry_end_date)))
-  
+
   
   rslt$cohort_inclusion_flags <- rslt$triple_cohort %>% 
     apply_inclusion_flags_rsv_study(ce_start_date = cohort_entry_start_date,
@@ -102,10 +97,6 @@ config_append('extra_packages', c())
              persons = distinct_ct(rslt$cohort_inclusion_flags %>% 
                                      filter(study_eligible == 1)))
   
-  append_sum(cohort = 'Not excluded due to overlapping index infections',
-             persons = distinct_ct(rslt$cohort_inclusion_flags %>% 
-                                     filter(study_eligible == 1,
-                                            exclude != 1)))
   
   ## Attrition table also broken down by category / one table per category / add a column for the step type
   ## TODO output the table that's filtered to study_eligible but still has index based exclusion reasons
@@ -128,12 +119,21 @@ config_append('extra_packages', c())
     group_by(sub_cohort, washout_reason) %>% 
     summarise(n=n_distinct(person_id)) %>% 
     output_tbl(paste0(cohort_1_label, "_washout_reasons"))
-
+  
   ## Final cohort
+  ## CORRECT EXCLUSION REASONS
   rslt$final_cohort <- rslt$other_washout_reasons %>% 
+    mutate(exclude = case_when(exclude_reason == "Had COVID: post-acute, FLU: index" ~ 0,
+                               exclude_reason == "Had COVID: index, FLU: post-acute" ~ 0,
+                               TRUE ~ exclude)) %>% 
     filter(study_eligible == 1) %>% 
     filter(exclude != 1) %>% 
     filter(washout == 0)
+  
+  append_sum(cohort = 'Not excluded due to overlapping index infections',
+             persons = distinct_ct(rslt$final_cohort %>% 
+                                     filter(study_eligible == 1,
+                                            exclude != 1)))
   
   ## Save table with exclusion reasons
   rslt$other_washout_reasons %>% 
@@ -148,9 +148,6 @@ config_append('extra_packages', c())
              persons = distinct_ct(rslt$final_cohort %>% 
                                      filter(sub_cohort=="Influenza")))
   
-  append_sum(cohort = 'Final Other respiratory sub-cohort',
-             persons = distinct_ct(rslt$final_cohort %>% 
-                                     filter(sub_cohort=="Respiratory")))
   
   output_sum(name = paste0(cohort_1_label, "_attrition"))
   
@@ -165,17 +162,18 @@ config_append('extra_packages', c())
   ## Step 2
   ## Generate outcomes
   results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
-    generate_output_outcome_lists(outcome = "rsv",
-                                  outcome_start_date = cohort_entry_start_date,
-                                  outcome_end_date = postacute_max_end_date,
-                                  output_tbl_name = paste0(cohort_1_label, "_rsv_outcomes"))
-  
-  results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
     generate_output_outcome_lists(outcome = "respiratory",
                                   outcome_start_date = cohort_entry_start_date,
                                   outcome_end_date = postacute_max_end_date,
                                   output_tbl_name = paste0(cohort_1_label, "_respiratory_outcomes"))
+  ## In addition, get covid outcomes as well, or record from pre-existing data to get a patient's first covid or reinfection outcome
   
+  ## Generate outcomes (any infection)
+  results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
+    generate_output_outcome_lists(outcome = "general",
+                                  outcome_start_date = cohort_entry_start_date,
+                                  outcome_end_date = postacute_max_end_date,
+                                  output_tbl_name = paste0(cohort_1_label, "_any_infection_outcomes"))
   
   ## Step 3
   ## Generate additional covariates
@@ -184,7 +182,7 @@ config_append('extra_packages', c())
   ### Utilization here
   ## TODO continue this on 3/26
   cohort_with_util_info <- results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
-    select(-visit_type_outpatient, -visit_type_admin_other_telemed, -visit_type_inpatient_or_ed) %>% # remove previous bad versions 
+    # select(-visit_type_outpatient, -visit_type_admin_other_telemed, -visit_type_inpatient_or_ed) %>% # remove previous bad versions 
     flag_utilization_level(cdm_tbl("visit_occurrence"), 365, cohort_1_label)
   
   cohort_with_util_info %>% 
@@ -227,7 +225,7 @@ config_append('extra_packages', c())
   message('Step 3: Apply most conservative PMCA algorithm and get PMCA flags')
   
   pmca_category <- compute_pmca_cats_cons(pmca_summary_tbl = pmca_summary,
-                                               cohort_tbl = results_tbl(paste0(cohort_1_label, "_cohort_demo"))  %>% 
+                                          cohort_tbl = results_tbl(paste0(cohort_1_label, "_cohort_demo"))  %>% 
                                             inner_join(cdm_tbl("person") %>% select(person_id, site), by="person_id"))
   
   # output_tbl(rslt$pmca_category,
@@ -243,12 +241,12 @@ config_append('extra_packages', c())
   #' complex_chronic, chronic, non_complex_chronic
   #' n_body_systems
   pmca_all_flags <- pmca_all_flags(pmca_summary_tbl = pmca_summary,
-                                        cohort_tbl = results_tbl(paste0(cohort_1_label, "_cohort_demo")) ,
-                                        pmca_category = pmca_category)
+                                   cohort_tbl = results_tbl(paste0(cohort_1_label, "_cohort_demo")) ,
+                                   pmca_category = pmca_category)
   
   #' Compute flags for any indication of each PMCA body system in the prior 3 years
   pmca_bs_flags <- flag_pmca_bs(cohort_tbl= results_tbl(paste0(cohort_1_label, "_cohort_demo")) ,
-                                     pmca_summary=pmca_summary)
+                                pmca_summary=pmca_summary)
   
   ##############################################################################
   message('Define PMCA flags in your cohort')
@@ -295,9 +293,9 @@ config_append('extra_packages', c())
   ## Output final analytic dataset at end, see next driver for modeling and/or reporting analytics!
   ## TODO have this be a running / evolving piece of code that generates the "final analytic dataset" that is ready to be plugged in to different models
   results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
-    select(-visit_type_outpatient, -visit_type_admin_other_telemed, -visit_type_inpatient_or_ed) %>% # remove previous bad versions 
-    generate_analytic_dataset(rsv_outcomes = results_tbl(paste0(cohort_1_label, "_rsv_outcomes")),
-                              respiratory_outcomes = results_tbl(paste0(cohort_1_label, "_respiratory_outcomes")),
+    # select(-visit_type_outpatient, -visit_type_admin_other_telemed, -visit_type_inpatient_or_ed) %>% # remove previous bad versions 
+    generate_analytic_dataset_resp(respiratory_outcomes = results_tbl(paste0(cohort_1_label, "_respiratory_outcomes")),
+                                   any_infection_outcomes = results_tbl(paste0(cohort_1_label, "_any_infection_outcomes")),
                               util_quantiles_tbl = results_tbl(paste0(cohort_1_label, "_visit_quantile_cat")),
                               hospitalization_tbl = results_tbl(paste0(cohort_1_label, "_hospitalization")),
                               ventilator_use_tbl = results_tbl(paste0(cohort_1_label, "_severe_ventilator_use")),

@@ -41,7 +41,7 @@ flag_outcome_infections <- function(cohort, outcome_start_date, outcome_end_date
 #'
 #' @examples
 flag_outcome_resp_infections <- function(cohort, outcome_start_date, outcome_end_date) {
-  
+  # TODO make an option in here that also includes covid infections but can also just flag later
   noncovid_resp_conditions <-
     load_codeset("dx_noncov_resp_infections") %>% 
     inner_join(cohort %>% 
