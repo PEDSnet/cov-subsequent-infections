@@ -177,6 +177,8 @@ config_append('extra_packages', c())
   
   ## Step 3
   ## Generate additional covariates
+  ## In person visit around index (aka severity)
+  ## Body systems
   
   
   ### Utilization here
@@ -213,13 +215,15 @@ config_append('extra_packages', c())
   
   #' The specified cohort should have person_id and observation_date; a 3-year lookback from
   #' the observation date is applied
-  pmca_lookup <- produce_pmca_lookup(cohort= results_tbl(paste0(cohort_1_label, "_cohort_demo")) )
+  pmca_lookup <- produce_pmca_lookup(cohort= results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
+                                       select(-observation_date) %>% 
+                                       mutate(observation_date = ce_date))
   
   pmca_summary <- compute_pmca_summary(pmca_lookup_tbl = pmca_lookup)
   
-  # output_tbl(rslt$pmca_summary,
-  #            'pmca_summary',
-  #            indexes=c('person_id'))
+  output_tbl(pmca_summary,
+             paste0(cohort_1_label,'pmca_summary'),
+             indexes=c('person_id'))
   
   ##############################################################################
   message('Step 3: Apply most conservative PMCA algorithm and get PMCA flags')

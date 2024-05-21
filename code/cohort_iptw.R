@@ -175,7 +175,9 @@ make_iptw_and_mw_weights_colby <- function(weight_formula=as.formula('covid~age_
   #' But weightit has nice love plots and balance tables that can be used for visualization
   w.out1 <- WeightIt::weightit(weight_formula,
                                data = dataset_final_trim,
-                               estimand = "ATE", method = "ps")
+                               estimand = "ATE", method = "ps", stabilize = TRUE)
+  
+  dataset_final_trim$s_weights = w.out1$weights
   
   set.cobalt.options(binary = "std")
   
@@ -668,6 +670,11 @@ run_logistic_regression <- function(df,
                      data = df, 
                      family = quasibinomial(link="logit"),
                      weights = iptw_gbm)
+  } else if (weight_method=="lr_s") {
+    model_fit <- glm(formula = as.formula(model_formula),
+                     data = df, 
+                     family = quasibinomial(link="logit"),
+                     weights = s_weights)
   } else{
     model_fit <- glm(formula = as.formula(model_formula),
                      data = df, 

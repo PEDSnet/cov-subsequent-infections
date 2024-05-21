@@ -41,6 +41,10 @@ require(WeightIt)
 require(scattermore)
 require(broom)
 require(tableone)
+require(survminer)
+library(survival)
+library(ggfortify)
+
 
 get_results <- function(tbl_name) {
   if (data_source == 'local') {
@@ -142,7 +146,8 @@ tidy.coxme <- function(x, exponentiate = FALSE, conf.int = 0.95, ...) {
   postacute_max_end_date = as.Date("2023-03-01")
   
   cohort_entry_start_date = as.Date("2021-06-01")
-  cohort_entry_end_date = as.Date("2023-02-01")
+  cohort_entry_end_date = as.Date("2023-01-01")
+  cohort_entry_end_date = as.Date("2022-10-01")
   
   cohort_1_label = "resp_study_cohort"
 
@@ -222,6 +227,10 @@ attrition_ordered %>%
   select(-ordering) %>%
   prettify_kable(c(3, 4, 7, 8))
 
+
+results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% select(person_id,sub_cohort) %>% left_join(results_tbl(paste0(cohort_1_label, "pmca_summary")) %>% mutate(yrs2 = ifelse(yr_1+yr_2+yr_3 > 0, 1, 0)))  %>% mutate(yrs2=ifelse(is.na(yrs2), 0, yrs2)) %>% group_by(body_system, yrs2, sub_cohort) %>% summarise(n=n()) %>% ungroup() %>% group_by(sub_cohort) %>% mutate(p=n/sum(n)) %>% filter(yrs2==1) %>% ggplot() + geom_bar(aes(x=body_system, y =p, fill=sub_cohort), stat="identity", position="dodge") +coord_flip() +theme_bw() + scale_fill_brewer(palette = "Set2") +
+  labs(x="Body system, at least 1 issue in last 3 years", y = "Proportion of cohort")
+
 ```
 
 
@@ -254,9 +263,9 @@ table1(~ sex_cat + race_eth_cat + age_cat_at_ce +
          hospitalized_at_index +
          hospitalized_at_index_detail +
          # complex_chronic_flag +
+         as.factor(pulmonary_respiratory) +
          insurance_class
          | sub_cohort, 
-       overall = T,
        data = analytic_dataset_final)
 
 analytic_dataset_final %>% 
@@ -1070,56 +1079,95 @@ table1(~ outcome_resp30d +
 outcome = "resp30d_or_covid30d"
 comparison_group = comparison_group_string
 
-iptw_flu <- analytic_dataset_final %>%
+iptw_time <- analytic_dataset_final %>%
+  filter(ce_date < as.Date("2023-01-01")) %>% 
+    mutate(ce_month = floor_date(ce_date, "month")) %>% 
+  mutate(ce_year = floor_date(ce_date, "year")) %>% 
+  mutate(ce_month_s = as.character(ce_month)) %>% 
+  mutate(ce_year_s = as.character(ce_year)) %>% 
   filter(resp_outcome_is_reinfection=="0") %>% # TODO allow for re-infection
   mutate(resp30d_or_covid30d = case_when(outcome_resp30d==1 ~ 1,
                                          outcome_covid30d==1 ~ 1,
                                          TRUE ~ 0)) %>% 
   do_iptw(cohort_entry_start_date = cohort_entry_start_date,
           comparison_cohort = comparison_group,
-          weight_formula = "covid~age_group+sex_cat+race_eth_cat+ce_week_factor",
-          iptw_description = paste0("resp_stdy_covid_", comparison_group, "_", outcome))
+          weight_formula = "covid~age_group+sex_cat+race_eth_cat+ce_month_s+pulmonary_respiratory",
+          iptw_description = paste0("resp_time_w", comparison_group, "_", outcome))
 
-iptw_flu$love_plot
+iptw_no_time <- analytic_dataset_final %>%
+    mutate(ce_month = floor_date(ce_date, "month")) %>% 
+  mutate(ce_month_s = as.character(ce_month)) %>% 
+  filter(resp_outcome_is_reinfection=="0") %>% # TODO allow for re-infection
+  mutate(resp30d_or_covid30d = case_when(outcome_resp30d==1 ~ 1,
+                                         outcome_covid30d==1 ~ 1,
+                                         TRUE ~ 0)) %>% 
+  do_iptw(cohort_entry_start_date = cohort_entry_start_date,
+          comparison_cohort = comparison_group,
+          weight_formula = "covid~age_group+sex_cat+race_eth_cat+pulmonary_respiratory+hospitalized_at_index", ## PULMONARY_RESP?
+          iptw_description = paste0("resp_notime_w", comparison_group, "_", outcome))
 
-dataset_with_iptw <- results_tbl( paste0(paste0("resp_stdy_covid_", comparison_group, "_", outcome),'_tabc')) %>%
+iptw_time$love_plot
+
+iptw_no_time$love_plot
+
+dataset_time_iptw <- results_tbl( paste0(paste0("resp_time_w", comparison_group, "_", outcome),'_tabc')) %>%
+  collect()
+
+dataset_notime_iptw <- results_tbl( paste0(paste0("resp_notime_w", comparison_group, "_", outcome),'_tabc')) %>%
   collect()
 
 
 models = list()
 
-models$model_unweighted_unadjusted <- run_logistic_regression(df = dataset_with_iptw,
+models$model_notime_unadjusted <- run_logistic_regression(df = dataset_notime_iptw,
                                                        model_formula = paste0(outcome, " ~ covid"),
                                                        weight_method = "none")
 
-models$model_unweighted_adjusted <- run_logistic_regression(df = dataset_with_iptw,
+models$model_notime_adjusted <- run_logistic_regression(df = dataset_notime_iptw,
                                                          model_formula = paste0(outcome,
-                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_outpatient + util_other"),
+                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + pulmonary_respiratory"),
                                                          weight_method = "none")
 
-models$model_weighted_unadjusted <- run_logistic_regression(df = dataset_with_iptw,
+models$model_notime_weighted_unadjusted <- run_logistic_regression(df = dataset_notime_iptw,
                                                        model_formula = paste0(outcome, " ~ covid"),
                                                        weight_method = "lr")
 
 # TODO something is wrong with inpatient
-models$model_weighted_adjusted <- run_logistic_regression(df = dataset_with_iptw,
+models$model_notime_weighted_adjusted <- run_logistic_regression(df = dataset_notime_iptw,
                                                          model_formula = paste0(outcome,
-                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_outpatient + util_other"),
+                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + pulmonary_respiratory"),
                                                          weight_method = "lr")
 
-models$model_weighted_adjusted_time <- run_logistic_regression(df = dataset_with_iptw,
+models$model_time_unadjusted <- run_logistic_regression(df = dataset_time_iptw,
+                                                       model_formula = paste0(outcome, " ~ covid"),
+                                                       weight_method = "none")
+
+models$model_time_adjusted <- run_logistic_regression(df = dataset_time_iptw,
                                                          model_formula = paste0(outcome,
-                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_outpatient + util_other + ce_week_factor"),
-                                                         weight_method = "lr")
+                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + pulmonary_respiratory + ce_month_s"),
+                                                         weight_method = "none")
+
+models$model_time_weighted_unadjusted <- run_logistic_regression(df = dataset_time_iptw,
+                                                       model_formula = paste0(outcome, " ~ covid"),
+                                                       weight_method = "lr_s")
+
+# TODO something is wrong with inpatient
+models$model_time_weighted_adjusted <- run_logistic_regression(df = dataset_time_iptw,
+                                                         model_formula = paste0(outcome,
+                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + pulmonary_respiratory + ce_month_s"),
+                                                         weight_method = "lr_s")
+
+
+
 
 ```
 
 ```{r, echo = FALSE, warning = FALSE, message = FALSE, fig.width=12, fig.height=6}
 
-plot_summs(models$model_unweighted_unadjusted,
-           models$model_unweighted_adjusted,
-           models$model_weighted_unadjusted,
-           models$model_weighted_adjusted,
+plot_summs(models$model_notime_unadjusted,
+           models$model_notime_adjusted,
+           models$model_notime_weighted_unadjusted,
+           models$model_notime_weighted_adjusted,
            # models$model_weighted_adjusted_time,
            model.names = c("Unweighted, unadjusted",
                            "Unweighted, adjusted",
@@ -1128,10 +1176,38 @@ plot_summs(models$model_unweighted_unadjusted,
                            # "Weighted, adjusted for CE week"),
            exp = TRUE)
 
-export_summs(models$model_unweighted_unadjusted,
-           models$model_unweighted_adjusted,
-           models$model_weighted_unadjusted,
-           models$model_weighted_adjusted,
+export_summs(models$model_notime_unadjusted,
+           models$model_notime_adjusted,
+           models$model_notime_weighted_unadjusted,
+           models$model_notime_weighted_adjusted,
+           # models$model_weighted_adjusted_time,
+           model.names = c("Unweighted, unadjusted",
+                           "Unweighted, adjusted",
+                           "Weighted (LR), unadjusted",
+                           "Weighted (LR), adjusted"),
+                           # "Weighted, adjusted for CE week"),
+           exp = TRUE)
+
+```
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE, fig.width=12, fig.height=6}
+
+plot_summs(models$model_time_unadjusted,
+           models$model_time_adjusted,
+           models$model_time_weighted_unadjusted,
+           models$model_time_weighted_adjusted,
+           # models$model_weighted_adjusted_time,
+           model.names = c("Unweighted, unadjusted",
+                           "Unweighted, adjusted",
+                           "Weighted (LR), unadjusted",
+                           "Weighted (LR), adjusted"),
+                           # "Weighted, adjusted for CE week"),
+           exp = TRUE)
+
+export_summs(models$model_time_unadjusted,
+           models$model_time_adjusted,
+           models$model_time_weighted_unadjusted,
+           models$model_time_weighted_adjusted,
            # models$model_weighted_adjusted_time,
            model.names = c("Unweighted, unadjusted",
                            "Unweighted, adjusted",
@@ -1155,7 +1231,7 @@ iptw_flu <- analytic_dataset_final %>%
   filter(resp_outcome_is_reinfection=="0") %>% # TODO allow for re-infection
   do_iptw(cohort_entry_start_date = cohort_entry_start_date,
           comparison_cohort = comparison_group,
-          weight_formula = "covid~age_group+sex_cat+race_eth_cat+ce_week_factor",
+          weight_formula = "covid~age_group+sex_cat+race_eth_cat+ce_week_factor+pulmonary_respiratory",
           iptw_description = paste0("resp_stdy_covid_", comparison_group, "_", outcome))
 
 iptw_flu$love_plot
@@ -1172,7 +1248,7 @@ models$model_unweighted_unadjusted <- run_logistic_regression(df = dataset_with_
 
 models$model_unweighted_adjusted <- run_logistic_regression(df = dataset_with_iptw,
                                                          model_formula = paste0(outcome,
-                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_outpatient + util_other"),
+                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_outpatient + util_other + pulmonary_respiratory"),
                                                          weight_method = "none")
 
 models$model_weighted_unadjusted <- run_logistic_regression(df = dataset_with_iptw,
@@ -1182,7 +1258,7 @@ models$model_weighted_unadjusted <- run_logistic_regression(df = dataset_with_ip
 # TODO something is wrong with inpatient
 models$model_weighted_adjusted <- run_logistic_regression(df = dataset_with_iptw,
                                                          model_formula = paste0(outcome,
-                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_outpatient + util_other"),
+                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_outpatient + util_other + pulmonary_respiratory"),
                                                          weight_method = "lr")
 
 models$model_weighted_adjusted_time <- run_logistic_regression(df = dataset_with_iptw,
@@ -1240,7 +1316,7 @@ iptw_flu <- analytic_dataset_final %>%
                                          TRUE ~ 0)) %>% 
   do_iptw(cohort_entry_start_date = cohort_entry_start_date,
           comparison_cohort = comparison_group,
-          weight_formula = "covid~age_group+sex_cat+race_eth_cat+ce_week_factor",
+          weight_formula = "covid~age_group+sex_cat+race_eth_cat+ce_week_factor+pulmonary_respiratory",
           iptw_description = paste0("resp_stdy_covid_", comparison_group, "_", outcome))
 
 iptw_flu$love_plot
@@ -1257,7 +1333,7 @@ models$model_unweighted_unadjusted <- run_logistic_regression(df = dataset_with_
 
 models$model_unweighted_adjusted <- run_logistic_regression(df = dataset_with_iptw,
                                                          model_formula = paste0(outcome,
-                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_outpatient + util_other"),
+                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_outpatient + util_other + pulmonary_respiratory"),
                                                          weight_method = "none")
 
 models$model_weighted_unadjusted <- run_logistic_regression(df = dataset_with_iptw,
@@ -1267,7 +1343,7 @@ models$model_weighted_unadjusted <- run_logistic_regression(df = dataset_with_ip
 # TODO something is wrong with inpatient
 models$model_weighted_adjusted <- run_logistic_regression(df = dataset_with_iptw,
                                                          model_formula = paste0(outcome,
-                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_outpatient + util_other"),
+                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_outpatient + util_other + pulmonary_respiratory"),
                                                          weight_method = "lr")
 
 models$model_weighted_adjusted_time <- run_logistic_regression(df = dataset_with_iptw,
@@ -1318,7 +1394,7 @@ iptw_flu <- analytic_dataset_final %>%
   filter(resp_outcome_is_reinfection=="0") %>% # TODO allow for re-infection
   do_iptw(cohort_entry_start_date = cohort_entry_start_date,
           comparison_cohort = comparison_group,
-          weight_formula = "covid~age_group+sex_cat+race_eth_cat+ce_week_factor",
+          weight_formula = "covid~age_group+sex_cat+race_eth_cat+ce_week_factor+pulmonary_respiratory",
           iptw_description = paste0("resp_stdy_covid_", comparison_group, "_", outcome))
 
 iptw_flu$love_plot
@@ -1335,7 +1411,7 @@ models$model_unweighted_unadjusted <- run_logistic_regression(df = dataset_with_
 
 models$model_unweighted_adjusted <- run_logistic_regression(df = dataset_with_iptw,
                                                          model_formula = paste0(outcome,
-                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_outpatient + util_other"),
+                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_outpatient + util_other + pulmonary_respiratory"),
                                                          weight_method = "none")
 
 models$model_weighted_unadjusted <- run_logistic_regression(df = dataset_with_iptw,
@@ -1345,7 +1421,7 @@ models$model_weighted_unadjusted <- run_logistic_regression(df = dataset_with_ip
 # TODO something is wrong with inpatient
 models$model_weighted_adjusted <- run_logistic_regression(df = dataset_with_iptw,
                                                          model_formula = paste0(outcome,
-                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_outpatient + util_other"),
+                                                                                " ~ covid + race_eth_cat + age_group + sex_cat + hospitalized_at_index + util_ed + util_outpatient + util_other + pulmonary_respiratory"),
                                                          weight_method = "lr")
 
 models$model_weighted_adjusted_time <- run_logistic_regression(df = dataset_with_iptw,
@@ -1380,6 +1456,80 @@ export_summs(models$model_unweighted_unadjusted,
                            "Weighted (LR), adjusted"),
                            # "Weighted, adjusted for CE week"),
            exp = TRUE)
+
+
+
+```
+
+### Survival anlsysis
+
+
+```{r echo = FALSE, output = FALSE, message = FALSE , warning = FALSE}
+
+# TODO really need to figure out what the deal with utilization is
+outcome = "outcome_general30d"
+comparison_group = comparison_group_string
+
+iptw_flu <- analytic_dataset_final %>%
+  filter(resp_outcome_is_reinfection=="0") %>% # TODO allow for re-infection
+  mutate(ce_month = floor_date(ce_date, "month")) %>% 
+  mutate(ce_month_s = as.character(ce_month)) %>% 
+  do_iptw(cohort_entry_start_date = cohort_entry_start_date,
+          comparison_cohort = comparison_group,
+          weight_formula = "covid~age_group+sex_cat+race_eth_cat+ce_month_s+pulmonary_respiratory",
+          iptw_description = paste0("resp_stdy_m_", comparison_group, "_", outcome))
+
+iptw_flu$love_plot
+
+dataset_with_iptw <- results_tbl( paste0(paste0("resp_stdy_m_", comparison_group, "_", outcome),'_tabc')) %>%
+  collect()
+
+modeling_dataset <- dataset_with_iptw %>% 
+  mutate(time_to_general30d = case_when(
+    outcome_general30d==0 ~ 180,
+    TRUE ~ days_from_index_to_first30d_general
+  )) %>% 
+    mutate(time_to_resp30d = case_when(
+    outcome_resp30d==0 ~ 180,
+    TRUE ~ days_from_index_to_first30d_resp
+  )) 
+
+
+hazard_unweighted <- survfit(Surv(time_to_general30d, outcome_general30d) ~ covid, data=modeling_dataset)
+ggsurvplot(hazard_unweighted)
+
+km_trt_fit <- survfit(Surv(time_to_general30d, outcome_general30d) ~ covid + pulmonary_respiratory, data=modeling_dataset, weights = capped_iptw)
+ggsurvplot(km_trt_fit)
+
+resp_unweighted <- survfit(Surv(time_to_resp30d, outcome_resp30d) ~ covid, data=modeling_dataset)
+ggsurvplot(resp_unweighted)
+
+resp_weighted <- survfit(Surv(time_to_resp30d, outcome_resp30d) ~ covid + pulmonary_respiratory, data=modeling_dataset, weights = capped_iptw)
+ggsurvplot(resp_weighted)
+
+cox_adj <- coxph(Surv(time_to_resp30d, outcome_resp30d) ~ covid + pulmonary_respiratory + hospitalized_at_index + ce_month_s, modeling_dataset, weights=capped_iptw)
+
+cox_unadj <- coxph(Surv(time_to_resp30d, outcome_resp30d) ~ covid + pulmonary_respiratory + hospitalized_at_index, modeling_dataset)
+
+cox_adj_g <- coxph(Surv(time_to_general30d, outcome_general30d) ~ covid + pulmonary_respiratory + hospitalized_at_index + ce_month_s, modeling_dataset, weights=capped_iptw)
+
+cox_unadj_g <- coxph(Surv(time_to_general30d, outcome_general30d) ~ covid, modeling_dataset)
+
+plot_summs(cox_unadj, cox_adj, cox_adj_g, cox_unadj_g, model.names=c(
+  "Resp unadjusted",
+  "Resp adjusted",
+  "General adjusted",
+  "General unadjusted"
+), exp=TRUE)
+
+export_summs(cox_unadj, cox_adj, cox_adj_g, cox_unadj_g, model.names=c(
+  "Resp unadjusted",
+  "Resp adjusted",
+  "General adjusted",
+  "General unadjusted"
+), exp=TRUE)
+
+
 
 ```
 
