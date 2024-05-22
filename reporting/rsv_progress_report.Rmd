@@ -181,7 +181,73 @@ visit_counts <- results_tbl(paste0(cohort_1_label, "_visit_lookback_counts")) %>
 ```
 
 
-# Section 1: Variables
+# Section 1: Variables and attrition
+
+## Attrition
+
+This attrition table considers the cohort entry period to be defined from *March 1, 2022* to *July 1, 2022*. 
+This means that the study outcome window will extend from *April 1, 2022* to *January 1, 2023*.
+
+
+Attrition based on cohort inclusion criteria. Inclusion criteria were computed according to the following rules.
+
+* Patients under 6 years old with at least one visit during cohort entry period (Jan 1 - July 1, 2022, may be tightened as desired)
+
+* Had evidence of either SARS-CoV-2 infection, Influenza, or any other respiratory infection within the cohort entry period
+
+* Had at least 1 visit within 18 months of index date, and at least 1 visit in the 1-6 months following the index date (follow up period)
+
+Index sub-cohort group was selected according to the following logic:
+
+* Select as initial index type and date the *earliest evidence of SARS-CoV-2 or Influenza or other ARI*
+
+* If a patient's index category is an *other ARI* but they *have evidence of SARS-CoV-2 or Influenza within 7 days*, update the index category to SARS-CoV-2/Influenza accordingly, but keep the index date the same as the preliminary ARI diagnosis
+
+* Exclusions:
+
+  * No prior SARS-CoV-2 ever, via test, diagnosis, or serology positive
+  
+  * No Influenza within pre-acute or acute period (6 months before index)
+  
+  * No prior RSV (outcome) or RSV within acute period
+  
+  * No co-infection of Influenza and SARS-Cov-2 within acute period
+  
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=8, fig.height=6}
+attrition <- results_tbl(paste0(cohort_1_label, "_attrition")) %>% 
+  collect()
+
+
+
+attrition_ordered <- attrition %>% 
+  mutate(ordering = case_when(
+    cohort == "Patients under 6 years old with at least 1 visit during CE period" ~ 1,
+    cohort == "Had at least 1 of COVID, influenza, and/or other respiratory infection event during CE period" ~ 2,
+    cohort == "Had COVID during CE period" ~ 3,
+    cohort == "Had influenza during CE period" ~ 4,
+    cohort == "Had other respiratory infection during CE period" ~ 5,
+    cohort == "Meets utilization inclusion criteria" ~ 6,
+    cohort == "Not excluded due to overlapping index infections" ~ 7,
+    cohort == "Final COVID sub-cohort" ~ 8,
+    cohort == "Final Influenza sub-cohort" ~ 9,
+    cohort == "Final Other respiratory sub-cohort" ~ 10,
+    TRUE ~ 0
+  ))
+
+
+attrition_ordered %>%
+  select("Attrition step" = cohort, persons, ordering) %>%
+  filter(ordering > 0) %>%
+  arrange(ordering) %>%
+  select(-ordering) %>%
+  prettify_kable(c(3, 4, 5, 8, 9, 10))
+
+
+```
+
+
 
 ## Table 1
 

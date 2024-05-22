@@ -98,8 +98,8 @@ prettify_kable <- function(data, indents = list()) {
 
 # Attrition
 
-This attrition table considers the cohort entry period to be defined from *Jan 1, 2022* to *July 1, 2022*. 
-This means that the study outcome window will extend from *February 1, 2022* to *January 1, 2023*.
+This attrition table considers the cohort entry period to be defined from *March 1, 2022* to *July 1, 2022*. 
+This means that the study outcome window will extend from *April 1, 2022* to *January 1, 2023*.
 
 ## Attrition steps for cohort inclusion 
 

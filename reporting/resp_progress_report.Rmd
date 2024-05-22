@@ -200,7 +200,6 @@ visit_counts <- results_tbl(paste0(cohort_1_label, "_visit_lookback_counts")) %>
 
 ## Attrition
 
-(TODO neaten up this table with the right order )
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=8, fig.height=6}
 attrition <- results_tbl(paste0(cohort_1_label, "_attrition")) %>% 
