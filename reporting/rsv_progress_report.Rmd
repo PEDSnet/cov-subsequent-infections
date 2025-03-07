@@ -16,7 +16,7 @@ Report for progress on study modeling and analysis for the comparison of the pre
 base_dir <- '..'
 Sys.setenv(PEDSNET_SKIP_REQUEST_EXECUTION=1)
 try(source('../site/run.R')) # May not be able to make db connection
-try(source('site/run.R'))
+#try(source('site/run.R'))
 
 # Set to "local" to read data from ../results, or another value to read from db
 data_source <- if_else(config('execution_mode') == 'distribution', 'local', 'not_local')
@@ -35,9 +35,8 @@ library(survey)
 library(survival)
 library(WeightIt)
 library(cobalt)
-library(jtools)
+#library(jtools)
 require(cobalt)
-require(WeightIt)
 require(scattermore)
 require(broom)
 require(tableone)
@@ -159,11 +158,11 @@ analytic_dataset_final <-
   filter(sex_cat != "Other/unknown") %>% 
   filter(is.na(covid_index_date_imputed) | covid_index_date_imputed==0) %>% 
   group_by(person_id) %>% 
-  mutate(exclude = max(exclude_for_prior_rsv)) %>% 
+  mutate(exclude = max(exclude_for_prior_rsv)) %>%
   filter(exclude < 1) %>%
   slice_min(rsv_evidence_date, with_ties=FALSE) %>% 
   ungroup() %>% 
-  mutate(lab_confirmed_index = ifelse(lab_confirmed==1, "lab confirmed", "dx only")) %>% 
+  mutate(cx = ifelse(lab_confirmed==1, "lab confirmed", "dx only")) %>% 
   mutate(lab_confirmed_rsv_outcome = ifelse(lab_confirmed_rsv==1, "lab confirmed RSV", "dx only")) %>% 
   # mutate(visit_span_criteria_rank = as.character(visit_span_criteria_rank)) %>% 
   mutate(hospitalized_at_index = ifelse(hospital_flag==1 & visit_span_criteria_rank=="1", "Hospitalized", "Not hospitalized")) %>% 
@@ -219,7 +218,8 @@ Index sub-cohort group was selected according to the following logic:
 attrition <- results_tbl(paste0(cohort_1_label, "_attrition")) %>% 
   collect()
 
-
+attrition_2 <- results_tbl(paste0("rsv_sensitivity_", "_attrition")) %>% 
+  collect()
 
 attrition_ordered <- attrition %>% 
   mutate(ordering = case_when(
@@ -263,7 +263,8 @@ attrition_ordered %>%
 #          | sub_cohort*lab_confirmed_index, 
 #        overall = F,
 #        data = final_dataset)
-
+#analytic_dataset_final<- analytic_dataset_final%>%mutate(age_cat_at_ce = factor(age_cat_at_ce, levels = c("<6 months", #"6months-1yr", "1-2 yrs", "2-3 yrs", "3-4 yrs", "4-5 yrs")))
+label(analytic_dataset_final$age_cat_at_ce)= "Age categories"
 table1(~ sex_cat + race_eth_cat + age_cat_at_ce + 
          util_inpatient +
          util_outpatient +
@@ -273,7 +274,7 @@ table1(~ sex_cat + race_eth_cat + age_cat_at_ce +
          visit_type_outpatient +
          visit_type_ed + 
          visit_type_other +
-         lab_confirmed_index +
+         #lab_confirmed_index +
          hospitalized_at_index +
          hospitalized_at_index_detail +
          as.factor(pulmonary_respiratory) +

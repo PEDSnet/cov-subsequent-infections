@@ -54,8 +54,10 @@ rsconnect/
 .Rdata
 .DS_Store
 .DS_STore?  
-**/results/**/*.csv
-**/results/**/*.log
+**/docs/**
+**/manuscript/**
+**/results/**
+**/reporting/**
 **/local/**
 *.zip
 *.nb.html
@@ -64,3 +66,5 @@ rsconnect/
 *.gpg
 .#*
 .Rproj.user
+*.json
+*.html

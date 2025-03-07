@@ -1,0 +1,410 @@
+
+
+---
+title: "Subsequent Infections - Figure 2b & c"
+date: "`r format(Sys.time(), '%m-%d-%y')`"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+---
+
+Report for progress on study modeling and analysis for the comparison of the presence of post-acute RSV infection in COVID-positive patients compared to comparison groups (influenza and other acute respiratory infections).
+
+```{r setup, include=FALSE}
+# Default taken from R notebook behavior: when knitting, wd will always be location of notebook
+base_dir <- '..'
+Sys.setenv(PEDSNET_SKIP_REQUEST_EXECUTION=1)
+try(source('../site/run.R')) # May not be able to make db connection
+#try(source('site/run.R'))
+
+# Set to "local" to read data from ../results, or another value to read from db
+data_source <- if_else(config('execution_mode') == 'distribution', 'local', 'not_local')
+
+require(tibble)
+require(knitr)
+require(kableExtra)
+require(readr)
+require(table1)
+require(ggplot2)
+library(GGally)
+require(tidyverse)
+require(lubridate)
+library(wesanderson)
+library(survey)
+library(survival)
+library(WeightIt)
+library(cobalt)
+library(jtools)
+require(cobalt)
+require(WeightIt)
+require(scattermore)
+require(broom)
+require(broom.mixed)
+require(tableone)
+
+get_results <- function(tbl_name) {
+  if (data_source == 'local') {
+    rslt <- read_csv(paste0('../results/', tbl_name, '.csv'))
+  }
+  else {
+    rslt <- results_tbl(tbl_name) %>% collect()
+  }
+  rslt
+}
+
+
+prettify_kable <- function(data, indents = list()) {
+  
+  if (length(indents)==0) {
+      data %>% 
+        kbl(digits = 2, format.args = list(big.mark = ',')) %>%
+        kable_classic(full_width = F, html_font = "Arial") %>% 
+        kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>% 
+        column_spec(1, bold = F, border_right = T)
+  } else {
+      data %>% 
+        kbl(digits = 2, format.args = list(big.mark = ',')) %>%
+        kable_classic(full_width = F, html_font = "Arial") %>% 
+        kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>% 
+        add_indent(indents) %>% 
+        column_spec(1, bold = F, border_right = T)
+  }
+
+  # 
+  # data %>% 
+  #   kable(digits = 2, format.args = list(big.mark = ',')) %>% 
+  #   kable_styling(bootstrap_options = c("striped", "hover")) %>% 
+  #   column_spec(1, bold = T, border_right = T)
+}
+
+my.render.cont <- function(x) {
+  with(stats.apply.rounding(stats.default(x), digits = 6), c("",
+    "Mean (SD)" = sprintf("%0.1f (%0.1f)", as.numeric(MEAN), as.numeric(SD)),
+    "Median [Q1-Q3]" = sprintf("%0.1f [%0.1f - %0.1f]", as.numeric(MEDIAN), as.numeric(Q1), as.numeric(Q3))
+  ))
+}
+
+my.render.cat <- function(x) {
+  c("", sapply(stats.default(x), function(y) {
+    with(
+      y,
+      sprintf("%s (%0.1f%%)", format(FREQ, big.mark = ","), PCT)
+    )
+  }))
+}
+
+pvalue <- function(x, ...) {
+  # Construct vectors of data y, and groups (strata) g
+  # from https://cran.r-project.org/web/packages/table1/vignettes/table1-examples.html#example-a-column-of-p-values
+
+  y <- unlist(x)
+  g <- factor(rep(1:length(x), times = sapply(x, length)))
+  if (is.numeric(y)) {
+    # For numeric variables, perform a standard 2-sample t-test
+    p <- t.test(y ~ g)$p.value
+  } else {
+    # For categorical variables, perform a chi-squared test of independence
+    p <- chisq.test(table(y, g))$p.value
+  }
+  # Format the p-value, using an HTML entity for the less-than sign.
+  # The initial empty string places the output on the line below the variable label.
+  c("", sub("<", "&lt;", format.pval(p, digits = 3, eps = 0.001)))
+}
+
+# fron https://rdrr.io/github/junkka/ehahelper/src/R/broom_coxme.R
+tidy.coxme <- function(x, exponentiate = FALSE, conf.int = 0.95, ...) {
+  beta <- x$coefficients
+  nvar <- length(beta)
+  nfrail <- nrow(x$var) - nvar
+  nn <- c("estimate", "exp()", "std.error", "statistic", "p.value")
+  se <- sqrt(diag(as.matrix(x$var))[nfrail + 1:nvar])
+  z <- qnorm((1 + conf.int) / 2, 0, 1)
+  ret <- data.frame(
+    "term" = names(beta),
+    "estimate" = beta,
+    "std.error" = se,
+    "statistic" = beta / se,
+    "p.value" = 1 - pchisq((beta / se)^2, 1),
+    "conf.low" = beta - z * se,
+    "conf.high" = beta + z * se,
+    "beta" = beta
+  )
+  if (exponentiate) {
+    ret$estimate <- exp(ret$estimate)
+    ret$conf.low <- exp(ret$conf.low)
+    ret$conf.high <- exp(ret$conf.high)
+  }
+  rownames(ret) <- c(1:nrow(ret))
+  ret
+}
+```
+
+# Data RSV
+```{r data_RSV, include = FALSE, echo=FALSE, message=FALSE, warning=FALSE}
+postacute_min_start_date = as.Date("2022-04-01")
+postacute_max_end_date = as.Date("2023-01-01")
+
+cohort_entry_start_date = as.Date("2022-03-01")
+cohort_entry_end_date = as.Date("2022-07-01")
+
+cohort_1_label = "rsv_study_cohort"
+
+comparison_group_string = "Influenza"
+
+
+analytic_dataset <-
+  results_tbl(paste0(cohort_1_label, "_analytic_dataset_highrisk")) %>% 
+  filter(ce_date >= cohort_entry_start_date,
+         ce_date < cohort_entry_end_date)
+
+analytic_dataset_final <-
+  analytic_dataset %>% 
+  filter(sex_cat != "Other/unknown") %>% 
+  filter(is.na(covid_index_date_imputed) | covid_index_date_imputed==0) %>% 
+  group_by(person_id) %>% 
+  mutate(exclude = max(exclude_for_prior_rsv)) %>% 
+  filter(exclude < 1) %>%
+  slice_min(rsv_evidence_date, with_ties=FALSE) %>% 
+  ungroup() %>% 
+  mutate(lab_confirmed_index = ifelse(lab_confirmed==1, "lab confirmed", "dx only")) %>% 
+  mutate(lab_confirmed_rsv_outcome = ifelse(lab_confirmed_rsv==1, "lab confirmed RSV", "dx only")) %>% 
+  # mutate(visit_span_criteria_rank = as.character(visit_span_criteria_rank)) %>% 
+  mutate(hospitalized_at_index = ifelse(hospital_flag==1 & visit_span_criteria_rank=="1", "Hospitalized", "Not hospitalized")) %>% 
+  mutate(hospital_flag = as.character(hospital_flag)) %>% 
+  mutate(hosp_with_vent = as.character(hosp_with_vent)) %>% 
+  mutate(hospitalized_at_index = ifelse(is.na(hospitalized_at_index), "Not hospitalized", hospitalized_at_index)) %>% 
+  mutate(hosp_with_vent = ifelse(is.na(hosp_with_vent), "0", hosp_with_vent))  %>% 
+  mutate(hospitalized_at_index_detail = ifelse(hospitalized_at_index=="Hospitalized" & hosp_with_vent=="1", "Hospitalized with ventilation", hospitalized_at_index)) %>% collect() %>%
+  mutate(pulmonary_respiratory = as.factor(pulmonary_respiratory),
+          highrisk_flag = if_else(highrisk_flag, "Yes", "No"))
+
+
+visit_counts <- results_tbl(paste0(cohort_1_label, "_visit_lookback_counts")) %>% 
+  collect()
+
+```
+
+# Data Resp
+```{r data_resp, echo = FALSE, output = FALSE, message = FALSE , warning = FALSE}
+postacute_min_start_date_resp = as.Date("2021-07-01")
+postacute_max_end_date_resp = as.Date("2023-03-01")
+  
+cohort_entry_start_date_resp = as.Date("2021-06-01")
+cohort_entry_end_date_resp = as.Date("2023-01-01")
+cohort_entry_end_date_resp = as.Date("2022-10-01")
+  
+cohort_1_label_resp = "resp_study_cohort"
+
+
+# description = "covid_flu_3"
+# description = "covid_flu_noutil"
+# description = "covid_flu_util"
+# description = "covid_ari_util"
+# description = "covid_ari_ce_week"
+# description = "covid_flu_nonexclude"
+
+description_resp = "covid_flu_comparison"
+# description = "covid_ari_comparison"
+# comparison_group_string = "Respiratory"
+comparison_group_string_resp = "Influenza"
+
+
+analytic_dataset_resp <-
+  results_tbl(paste0(cohort_1_label_resp, "_analytic_dataset_highrisk")) %>% 
+  filter(ce_date >= cohort_entry_start_date_resp,
+         ce_date < cohort_entry_end_date_resp)
+
+analytic_dataset_final_resp <-
+  analytic_dataset_resp %>% 
+  filter(sex_cat != "Other/unknown") %>% 
+  filter(is.na(covid_index_date_imputed) | covid_index_date_imputed==0) %>% 
+  group_by(person_id) %>% # TODO might need to filter earliest resp date or something
+  ungroup() %>% 
+  mutate(lab_confirmed_index = ifelse(lab_confirmed==1, "lab confirmed", "dx only")) %>% 
+  # mutate(visit_span_criteria_rank = as.character(visit_span_criteria_rank)) %>% 
+  mutate(hospitalized_at_index = if_else(hospital_flag==1 & visit_span_criteria_rank=="1", "Yes","No")) %>% 
+  mutate(hospital_flag = as.character(hospital_flag)) %>% 
+  mutate(hosp_with_vent = as.character(hosp_with_vent)) %>% 
+  mutate(hospitalized_at_index = if_else(is.na(hospitalized_at_index), "No", hospitalized_at_index)) %>% 
+  mutate(hosp_with_vent = ifelse(is.na(hosp_with_vent), "0", hosp_with_vent))  %>% 
+  mutate(hospitalized_at_index_detail = ifelse(hospitalized_at_index== "Yes" & hosp_with_vent=="1", "Hospitalized with ventilation", hospitalized_at_index)) %>% 
+  mutate(resp_outcome_is_reinfection = case_when(resp_outcome_flu_related=="x" & sub_cohort=="Influenza" ~ "1",
+                                                 outcome_covid30d=="1" & sub_cohort=="COVID" ~ "1",
+                                                 TRUE ~ "0")) %>% 
+  mutate(highrisk_flag = if_else(highrisk_flag, "Yes", "No")) %>%
+  # mutate(rsv_outcome_postacute = ifelse(rsv_occurrence_period == "post acute (15-180 days after index)", 1, 0)) %>% 
+  collect()
+
+visit_counts_resp <- results_tbl(paste0(cohort_1_label_resp, "_visit_lookback_counts")) %>%
+  collect()
+
+```
+
+## New Fig 2b: Subsequent Respiratory infection within 30-180 days **Including covid, or flu, ANY respiratory infection within 30-180 days**
+```{r New_figure_2b_highrisk_ari, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=8, fig.height=6}
+models_highrisk_2b = list()
+
+outcome_ari = "resp30d_or_covid30d"
+comparison_group_ari = "Influenza"
+
+formula_no_pulmonary = "~ covid+ age_group + race_eth_cat + sex_cat + hospitalized_at_index +  util_inpatient +  util_outpatient +  util_ed + util_other"
+
+# ari_iptw_30_180 <- analytic_dataset_final_resp %>%
+#     mutate(ce_month = floor_date(ce_date, "month")) %>% 
+#   mutate(ce_month_s = as.character(ce_month)) %>% 
+#   filter(resp_outcome_is_reinfection=="0") %>% # TODO allow for re-infection
+#   mutate(resp30d_or_covid30d = case_when(outcome_resp30d==1 ~ 1,
+#                                          outcome_covid30d==1 ~ 1,
+#                                          TRUE ~ 0)) %>% 
+#   do_iptw(cohort_entry_start_date = cohort_entry_start_date,
+#           comparison_cohort = comparison_group,
+#           weight_formula = "covid~age_group+sex_cat+race_eth_cat+pulmonary_respiratory+hospitalized_at_index+ce_week_factor+ highrisk_flag", ## PULMONARY_RESP?
+#           iptw_description = "resp_notime_w_flu_resp30d_highrisk")
+# 
+# dataset_iptw_ari <- results_tbl( paste0("resp_notime_w_flu_resp30d_highrisk",'_tabc')) %>%
+#   collect()
+# 
+# models_ari_2b = list()
+# 
+# models_ari_2b$model_unweighted_unadjusted <- run_logistic_regression(df = dataset_iptw_ari,
+#                                                        model_formula = paste0(outcome_ari, " ~ covid"),
+#                                                        weight_method = "none")
+# 
+# models_ari_2b$model_unweighted_adjusted <- run_logistic_regression(df = dataset_iptw_ari,
+#                                                          model_formula = paste0(outcome_ari,
+#                                                                                formula_no_pulmonary, " + highrisk_flag"),
+#                                                          weight_method = "none")
+# 
+# models_ari_2b$model_weighted_unadjusted <- run_logistic_regression(df = dataset_iptw_ari,
+#                                                        model_formula = paste0(outcome_ari, " ~ covid"),
+#                                                        weight_method = "lr_s")
+# 
+# # TODO something is wrong with inpatient
+# models_ari_2b$model_weighted_adjusted <- run_logistic_regression(df = dataset_iptw_ari,
+#                                                          model_formula = paste0(outcome_ari,
+#                                                                                 formula_no_pulmonary, " + highrisk_flag"),
+#                                                          weight_method = "lr_s")
+var_to_omit <- c("(Intercept)", "util_inpatientno_visits", "util_inpatientlow_utilizer", "util_inpatienthigh_utilizer",
+                 "util_inpatientmoderate_utilizer",
+                 "util_outpatientno_visits", "util_outpatientlow_utilizer", "util_outpatienthigh_utilizer", "util_outpatientmoderate_utilizer",
+                 "util_edno_visits", "util_edlow_utilizer", "util_edhigh_utilizer", "util_edmoderate_utilizer",
+                 "util_otherno_visits", "util_otherlow_utilizer", "util_otherhigh_utilizer", "util_othermoderate_utilizer")
+
+# p_2b <- plot_summs(models_ari_2b$model_unweighted_unadjusted,
+#            models_ari_2b$model_unweighted_adjusted,
+#            models_ari_2b$model_weighted_unadjusted,
+#            models_ari_2b$model_weighted_adjusted,
+#            omit.coefs = var_to_omit,
+#            # models$model_weighted_adjusted_time,
+#            model.names = c("Unweighted, unadjusted",
+#                            "Unweighted, adjusted",
+#                            "Weighted (LR), unadjusted",
+#                            "Weighted (LR), adjusted"),
+#                            # "Weighted, adjusted for CE week"),
+#            exp = TRUE)
+# p_2b <- p_2b + scale_y_discrete(labels = c("High Risk Conditions",
+#                                 "Hopspitalized for index infection",
+#                                 "Male",
+#                                 "Other/Unknown Race", "Non-Hispanic White", "Non-Hispanic Multiple", "Non-Hispanic Black/AA", "Non-Hispanic Asian/PI",
+#                                 "6m-1y old", "4-5y old", "3-4y old", "2-3y old", "1-2y old", "SARS-CoV-2 Infection")) +
+#                 labs(x = "Odd ratios", y = "")
+# 
+# ggsave("figures/NEW_Figure_2b_ari_with_covid_30_180_highrisk.png", plot = p_2b, width = 20, height = 10, units = "cm")
+```
+
+```{r new_fig2b_stats, results = "asis", echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+# export_summs(models_ari_2b$model_unweighted_unadjusted,
+#            models_ari_2b$model_unweighted_adjusted,
+#            models_ari_2b$model_weighted_unadjusted,
+#            models_ari_2b$model_weighted_adjusted,
+#            # models$model_weighted_adjusted_time,
+#            model.names = c("Unweighted, unadjusted",
+#                            "Unweighted, adjusted",
+#                            "Weighted (LR), unadjusted",
+#                            "Weighted (LR), adjusted"),
+#                            # "Weighted, adjusted for CE week"),
+#            exp = TRUE,
+#            error_format = "[{conf.low}, {conf.high}]")
+```
+
+## New Fig 2c: Subsequent General (any) infection within 30-180 days inlcuding covid
+```{r New_figure_2c_highrisk_ari, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=8, fig.height=6}
+models_highrisk_2c = list()
+
+outcome = "outcome_general30d"
+comparison_group = "Influenza"
+
+# any_inf_iptw_flu_30_180 <- analytic_dataset_final_resp %>%
+#   filter(resp_outcome_is_reinfection=="0") %>% # TODO allow for re-infection
+#   do_iptw(cohort_entry_start_date = cohort_entry_start_date_resp,
+#           comparison_cohort = comparison_group,
+#           weight_formula = "covid~age_group+sex_cat+race_eth_cat+ce_week_factor+highrisk_flag",
+#           iptw_description = "resp_study_covid_flu_general30d_highrisk")
+
+dataset_with_iptw <- results_tbl( paste0("resp_study_covid_flu_general30d_highrisk", '_tabc')) %>%
+  collect()
+
+models_highrisk_2c$model_unweighted_unadjusted <- run_logistic_regression(df = dataset_with_iptw,
+                                                       model_formula = paste0(outcome, " ~ covid"),
+                                                       weight_method = "none")
+
+models_highrisk_2c$model_unweighted_adjusted <- run_logistic_regression(df = dataset_with_iptw,
+                                                         model_formula = paste0(outcome,
+                                                                                formula_no_pulmonary, " + highrisk_flag"), 
+                                                         weight_method = "none")
+
+models_highrisk_2c$model_weighted_unadjusted <- run_logistic_regression(df = dataset_with_iptw,
+                                                       model_formula = paste0(outcome, " ~ covid"),
+                                                       weight_method = "lr")
+
+models_highrisk_2c$model_weighted_adjusted <- run_logistic_regression(df = dataset_with_iptw,
+                                                         model_formula = paste0(outcome,
+                                                                                formula_no_pulmonary, " + highrisk_flag"), 
+                                                         weight_method = "lr")
+var_to_omit <- c("(Intercept)", "util_inpatientno_visits", "util_inpatientlow_utilizer", "util_inpatienthigh_utilizer",
+                 "util_inpatientmoderate_utilizer",
+                 "util_outpatientno_visits", "util_outpatientlow_utilizer", "util_outpatienthigh_utilizer", "util_outpatientmoderate_utilizer",
+                 "util_edno_visits", "util_edlow_utilizer", "util_edhigh_utilizer", "util_edmoderate_utilizer",
+                 "util_otherno_visits", "util_otherlow_utilizer", "util_otherhigh_utilizer", "util_othermoderate_utilizer")
+
+p_2c <- plot_summs(models_highrisk_2c$model_unweighted_unadjusted,
+           models_highrisk_2c$model_unweighted_adjusted,
+           models_highrisk_2c$model_weighted_unadjusted,
+           models_highrisk_2c$model_weighted_adjusted,
+           omit.coefs = var_to_omit,
+           # models$model_weighted_adjusted_time,
+           model.names = c("Unweighted, unadjusted",
+                           "Unweighted, adjusted",
+                           "Weighted (LR), unadjusted",
+                           "Weighted (LR), adjusted"),
+                           # "Weighted, adjusted for CE week"),
+           exp = TRUE)
+
+p_2c <- p_2c + scale_y_discrete(labels = c("High risk conditions", 
+                                "Hopspitalized for index infection", 
+                                "Male", 
+                                "Other/Unknown Race", "Non-Hispanic White", "Non-Hispanic Multiple", "Non-Hispanic Black/AA", "Non-Hispanic Asian/PI",
+                                "6m-1y old", "4-5y old", "3-4y old", "2-3y old", "1-2y old", "SARS-CoV-2 Infection")) +
+                labs(x = "Odd ratios", y = "") 
+
+ggsave("figures/NEW_Figure_2c_general_30_180_highrisk.png", plot = p_2c, width = 20, height = 10, units = "cm")
+```
+
+```{r new_fig2c_stats, results = "asis", echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+# export_summs(models_highrisk_2c$model_unweighted_unadjusted,
+#            models_highrisk_2c$model_unweighted_adjusted,
+#            models_highrisk_2c$model_weighted_unadjusted,
+#            models_highrisk_2c$model_weighted_adjusted,
+#            # models$model_weighted_adjusted_time,
+#            model.names = c("Unweighted, unadjusted",
+#                            "Unweighted, adjusted",
+#                            "Weighted (LR), unadjusted",
+#                            "Weighted (LR), adjusted"),
+#                            # "Weighted, adjusted for CE week"),
+#            exp = TRUE,
+#            error_format = "[{conf.low}, {conf.high}]")
+```
+

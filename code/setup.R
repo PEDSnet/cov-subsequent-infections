@@ -11,6 +11,7 @@ suppressPackageStartupMessages(library(dbplyr))
 
 # Required for execution using Rscript
 suppressPackageStartupMessages(library(methods))
+suppressPackageStartupMessages(library(tidyr))
 
 #' Load additional packages at runtime
 #'

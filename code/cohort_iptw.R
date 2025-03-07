@@ -262,7 +262,7 @@ make_iptw_and_mw_weights_colby <- function(weight_formula=as.formula('covid~age_
   
   #' Output final IPTW table with weights, post trimming
   output_tbl(dataset_final_trim, paste0(description,'_tabc'), indexes=c('person_id'))
-  
+  #output_tbl(dataset_final_trim, description, indexes=c('person_id'), results_tag = FALSE)
   return(final)
   
 }
@@ -348,6 +348,7 @@ make_iptw_and_mw_weights_gbm <- function(weight_formula=as.formula('covid~age_gr
                                           (1/(1-dataset_final_trim$p_score))
   )
   
+  # sometimes this step does not converge
   ps_model_balanced <- glm(weight_formula, family=quasibinomial(link="logit"),
                            data = dataset_final_trim,
                            weights = capped_iptw)
@@ -572,6 +573,8 @@ set_iptw_levels <- function(iptw_data=rslt$iptw_data) {
   iptw_data$util_inpatient <- factor(iptw_data$util_inpatient) %>% relevel(ref='no_visits')
   iptw_data$util_outpatient <- factor(iptw_data$util_outpatient) %>% relevel(ref='low_utilizer')
   iptw_data$util_ed <- factor(iptw_data$util_ed) %>% relevel(ref='no_visits')
+  #iptw_data$hospitalized_at_index <- factor(iptw_data$hospitalized_at_index) %>% relevel(ref='0')
+  iptw_data$highrisk_flag <- factor(iptw_data$highrisk_flag) %>% relevel(ref = "No")
   #iptw_data$total_pre <- factor(iptw_data$total_pre) %>% relevel(ref = '01 to 05 visits')
   # iptw_data$total_pre_1y <- factor(iptw_data$total_pre_1y) %>% relevel(ref = '01_to_04_visits')
   #iptw_data$visit_type <- factor(iptw_data$visit_type) %>% relevel(ref = 'Outpatient_and_telemedicine')

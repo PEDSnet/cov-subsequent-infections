@@ -49,7 +49,7 @@ config_append('extra_packages', c())
   rslt$pats_under_age_6 <- pats_with_visit_under_age(cdm_tbl("person"),
                                                         cdm_tbl("visit_occurrence"), 
                                                         cohort_entry_start_date, 
-                                                        cohort_entry_end_date, age_limit_years_rough = 6) %>% 
+                                                        cohort_entry_end_date, age_limit_years_rough = 5) %>% 
     compute_new(indexes=c("person_id"))
   
   append_sum(cohort = 'Patients under 6 years old with at least 1 visit during CE period',
@@ -138,7 +138,7 @@ config_append('extra_packages', c())
   ## Save table with exclusion reasons
   rslt$other_washout_reasons %>% 
     filter(study_eligible == 1) %>% 
-    output_tbl(paste0(cohort_1_label, "_w_exclusion_reasons"), indexes=c("person_id"))
+    output_tbl(paste0(cohort_1_label, "_w_excl_rea"), indexes=c("person_id"), results_tag = FALSE)
   
   append_sum(cohort = 'Final COVID sub-cohort',
              persons = distinct_ct(rslt$final_cohort %>% 
@@ -160,17 +160,17 @@ config_append('extra_packages', c())
     get_insurance_class() 
   
   rslt$final_cohort_demo %>% 
-    output_tbl(paste0(cohort_1_label, "_cohort_demo"), indexes=c("person_id"))
+    output_tbl(paste0(cohort_1_label, "_cohort_demo"), indexes=c("person_id"), results_tag = FALSE)
   
   ## Step 2
   ## Generate outcomes
-  results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
+  results_tbl(paste0(cohort_1_label, "_cohort_demo"), results_tag = FALSE) %>% 
     generate_output_outcome_lists(outcome = "rsv",
                                   outcome_start_date = cohort_entry_start_date,
                                   outcome_end_date = postacute_max_end_date,
                                   output_tbl_name = paste0(cohort_1_label, "_rsv_outcomes"))
   
-  results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
+  results_tbl(paste0(cohort_1_label, "_cohort_demo"), results_tag = FALSE) %>% 
     generate_output_outcome_lists(outcome = "respiratory",
                                   outcome_start_date = cohort_entry_start_date,
                                   outcome_end_date = postacute_max_end_date,
@@ -183,8 +183,8 @@ config_append('extra_packages', c())
   
   ### Utilization here
   ## TODO continue this on 3/26
-  cohort_with_util_info <- results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
-    select(-visit_type_outpatient, -visit_type_admin_other_telemed, -visit_type_inpatient_or_ed) %>% # remove previous bad versions 
+  cohort_with_util_info <- results_tbl(paste0(cohort_1_label, "_cohort_demo"), results_tag = FALSE) %>% 
+    #select(-visit_type_outpatient, -visit_type_admin_other_telemed, -visit_type_inpatient_or_ed) %>% # remove previous bad versions 
     flag_utilization_level(cdm_tbl("visit_occurrence"), 365, cohort_1_label)
   
   cohort_with_util_info %>% 
@@ -192,7 +192,7 @@ config_append('extra_packages', c())
     output_tbl(paste0(cohort_1_label, "_visit_quantile_cat"))
   
   ## Hospitalization
-  cohort_with_hosp_info <- results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
+  cohort_with_hosp_info <- results_tbl(paste0(cohort_1_label, "_cohort_demo"), results_tag = FALSE) %>% 
     mutate(index_date = ce_date) %>% 
     flag_hospitalizations()
   
@@ -215,10 +215,10 @@ config_append('extra_packages', c())
   
   #' The specified cohort should have person_id and observation_date; a 3-year lookback from
   #' the observation date is applied
-  pmca_lookup <- produce_pmca_lookup(cohort= results_tbl(paste0(cohort_1_label, "_cohort_demo")) )
+  pmca_lookup <- produce_pmca_lookup(cohort= results_tbl(paste0(cohort_1_label, "_cohort_demo"), results_tag = FALSE) )
   
   pmca_summary <- compute_pmca_summary(pmca_lookup_tbl = pmca_lookup)
-  
+  pmca_summary %>% output_tbl(paste0(cohort_1_label, "_pmca_summary"))
   # output_tbl(rslt$pmca_summary,
   #            'pmca_summary',
   #            indexes=c('person_id'))
@@ -227,7 +227,7 @@ config_append('extra_packages', c())
   message('Step 3: Apply most conservative PMCA algorithm and get PMCA flags')
   
   pmca_category <- compute_pmca_cats_cons(pmca_summary_tbl = pmca_summary,
-                                               cohort_tbl = results_tbl(paste0(cohort_1_label, "_cohort_demo"))  %>% 
+                                               cohort_tbl = results_tbl(paste0(cohort_1_label, "_cohort_demo"), results_tag = FALSE)  %>% 
                                             inner_join(cdm_tbl("person") %>% select(person_id, site), by="person_id"))
   
   # output_tbl(rslt$pmca_category,
@@ -243,11 +243,11 @@ config_append('extra_packages', c())
   #' complex_chronic, chronic, non_complex_chronic
   #' n_body_systems
   pmca_all_flags <- pmca_all_flags(pmca_summary_tbl = pmca_summary,
-                                        cohort_tbl = results_tbl(paste0(cohort_1_label, "_cohort_demo")) ,
+                                        cohort_tbl = results_tbl(paste0(cohort_1_label, "_cohort_demo"), results_tag = FALSE) ,
                                         pmca_category = pmca_category)
   
   #' Compute flags for any indication of each PMCA body system in the prior 3 years
-  pmca_bs_flags <- flag_pmca_bs(cohort_tbl= results_tbl(paste0(cohort_1_label, "_cohort_demo")) ,
+  pmca_bs_flags <- flag_pmca_bs(cohort_tbl= results_tbl(paste0(cohort_1_label, "_cohort_demo"), results_tag = FALSE),
                                      pmca_summary=pmca_summary)
   
   ##############################################################################
@@ -258,7 +258,7 @@ config_append('extra_packages', c())
   #' non_complex_chronic: flags patients who are neither "complex chronic" nor "chronic" patients
   #' (patients who do not have any indication of chronic or complex chronic disease)
   
-  cohort_pmca_flags <- results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>%
+  cohort_pmca_flags <- results_tbl(paste0(cohort_1_label, "_cohort_demo"), results_tag = FALSE) %>%
     select('person_id') %>% 
     left_join(pmca_all_flags %>%
                 select(-site), by='person_id') %>%
@@ -281,6 +281,7 @@ config_append('extra_packages', c())
       n_body_systems==0L~"No body systems")) %>% 
     compute_new()
   
+  
   cohort_pmca_flags %>% 
     output_tbl(paste0(cohort_1_label, "_pmca_info"))
   
@@ -294,7 +295,7 @@ config_append('extra_packages', c())
   
   ## Output final analytic dataset at end, see next driver for modeling and/or reporting analytics!
   ## TODO have this be a running / evolving piece of code that generates the "final analytic dataset" that is ready to be plugged in to different models
-  results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
+  cohort_demo <- results_tbl(paste0(cohort_1_label, "_cohort_demo")) %>% 
     select(-visit_type_outpatient, -visit_type_admin_other_telemed, -visit_type_inpatient_or_ed) %>% # remove previous bad versions 
     generate_analytic_dataset(rsv_outcomes = results_tbl(paste0(cohort_1_label, "_rsv_outcomes")),
                               respiratory_outcomes = results_tbl(paste0(cohort_1_label, "_respiratory_outcomes")),
@@ -305,7 +306,6 @@ config_append('extra_packages', c())
                               output_tbl_name = paste0(cohort_1_label, "_analytic_dataset"))
   
   message('Done.')
-  
   invisible(rslt)
   
 }

@@ -45,15 +45,14 @@ if (Sys.getenv("AWS")==TRUE) {
   config('db_src', {
     require(srcr);
     default <- Sys.getenv('PEDSNET_DB_SRC_CONFIG_BASE', unset = NA)
-    if (is.na(default) || nchar(default) == 0) default <- 'argos_rcvr_s11'
-    srcr(default)
+    if (is.na(default) || nchar(default) == 0) default <- 'argos_rcvr'
+    srcr(paths = file.path(base_dir, paste0(default, ".json")))
   })
 } else {
   config('db_src', {
     require(srcr);
     default <- Sys.getenv('PEDSNET_DB_SRC_CONFIG_BASE', unset = NA)
     if (is.na(default) || nchar(default) == 0) default <- 'argos_covid_wk180'
-    srcr(default)
   })
 }
 

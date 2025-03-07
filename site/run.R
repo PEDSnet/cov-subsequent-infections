@@ -46,10 +46,10 @@
 #' If you always rely on running the package with the working directory set to
 #' the package directory, you can skip this, at the cost of portability.
 #' @md
-req_basename <- 'cov-subsequent-infections'
+req_basename <- "cov-subsequent-infections"
 
 ## If running on full RECOVER data on AWS, set to true
-Sys.setenv("AWS"=TRUE)
+# Sys.setenv("AWS"=TRUE)
 
 #' Please don't edit: path to the top-level directory of this request package
 #'
@@ -66,7 +66,11 @@ Sys.setenv("AWS"=TRUE)
 #' mechanism, but in cases of absolute need, you can replace the value below
 #' with a simple path string.
 #' @md
-base_dir <- 'auto-detect'
+
+base_dir <- file.path(Sys.getenv("HOME"),"Projects", req_basename)
+if(Sys.getenv("AWS")){
+  base_dir = 'auto-detect'
+} 
 
 if (base_dir == 'auto-detect') {
   base_dir <-
@@ -122,9 +126,9 @@ config('retain_intermediates', NA)
 #' during processing of the request.
 #' If it is `NA`, the default value from site_info.R is used.
 #' @md
-config('results_schema', 'subsq_infctns')
+config('results_schema', 'subsequent_infections')
 if (Sys.getenv("AWS")) {
-  config('results_schema', 'subsequent_infections')
+  config('results_schema', 'sub_infections_NN_pasc_211')
 }
 
 #' Request-specific suffix for output
@@ -135,7 +139,7 @@ if (Sys.getenv("AWS")) {
 #' table name length.
 #' @md
 config('results_name_tag',
-       '_pasc_211')
+       '')
 config('local_name_tag', '_loc')
 
 #' Execution mode
@@ -161,7 +165,7 @@ config('results_target',
 #' This Boolean value specifies whether the query log should include
 #' detailed information about execution of SQL queries in the database
 #' @md
-config('db_trace', FALSE)
+config('db_trace', TRUE)
 
 #' Request-specific caching of loaded codesets
 #'
