@@ -1,0 +1,530 @@
+---
+title: "Subsequent Infections - Prospective Cohort Analysis"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+---
+
+<!-- TODO: in here, combine the old precohort_eda and cohorts_pre_matching work to make a document that can be an artifact of what -->
+<!-- went into cohort creation. Can be referenced later with attrition tables, table 1s, etc., and visuals of the temporal counts of the disease -->
+
+<!-- Can also use it to help pick time periods to focus on based on data availibility -->
+
+This report provides a summary of available data on prospective cohorts. Attrition tables are attached to show available data vs. usable data, according to rough utilization criteria, along with a Table 1 for each cohort of study variables to the extent to which they are available at this stage of the study.
+
+This report should be used to help select time anchors for sub-analyses, using the time series plots of cases below.
+
+```{r include=FALSE}
+# Default taken from R notebook behavior: when knitting, wd will always be location of notebook
+base_dir <- '..'
+Sys.setenv(PEDSNET_SKIP_REQUEST_EXECUTION=1)
+try(source('../site/run.R')) # May not be able to make db connection
+
+# Set to "local" to read data from ../results, or another value to read from db
+data_source <- if_else(config('execution_mode') == 'distribution', 'local', 'not_local')
+
+require(tibble)
+require(knitr)
+require(kableExtra)
+require(readr)
+require(table1)
+require(ggplot2)
+require(tidyverse)
+require(lubridate)
+library(wesanderson)
+
+get_results <- function(tbl_name) {
+  if (data_source == 'local') {
+    rslt <- read_csv(paste0('../results/', tbl_name, '.csv'))
+  }
+  else {
+    rslt <- results_tbl(tbl_name) %>% collect()
+  }
+  rslt
+}
+
+
+prettify_kable <- function(data) {
+  data %>% kable(digits = 2, format.args = list(big.mark = ',')) %>% 
+    kable_styling(bootstrap_options = c("striped", "hover")) %>% 
+    column_spec(1, bold = T, border_right = T)
+}
+
+
+```
+
+# Cohort availability
+
+## Data timeframe
+
+Data shown available from April 1, 2021 to October 1, 2023. Cohort entry periods and outcome periods may be fine tuned for final analysis.
+
+### Attrition
+
+Attrition table of patients that fit each cohort definition, and whether they are eligible for the study or not. We began with a cohort of patients roughly under 6 years of age (as a denominator), then fine-tuned age based on cohort entry date.
+
+Eligibility requirements were:
+
+1. Less than 5 years of age at the cohort entry date
+
+2. Fits one of the cohort entrance criteria (flu, covid, or none)
+
+3. Has a visit in the 1-6 months following cohort entry date
+
+4. Has had a prior visit within 1.5 years of the cohort entry date
+
+These criteria are broken down further in the following tables.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+cohort_1_label = "_06210223_"
+cohort_1_label = "_04211023_"
+
+cohort_prematch <- results_tbl(paste0("ce", cohort_1_label, "unfiltered"))
+
+table1(~ study_eligible | cohort_assignment, 
+       data= cohort_prematch %>% mutate(study_eligible = as.character(study_eligible)))
+
+table1(~ cohort_assignment | study_eligible, 
+       data= cohort_prematch %>% mutate(study_eligible = as.character(study_eligible)))
+
+```
+
+Table of eligibility requirement breakdown and attrition:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+ce_start_date = as.Date("2021-04-01")
+ce_end_date = as.Date("2023-10-01")
+
+cohort_prematch <- results_tbl(paste0("ce", cohort_1_label, "unfiltered")) %>% 
+  mutate(satisfied_prior_visit_criteria = visit_within_n_years > 0,
+         cohort_entry_date_in_window = ce_date >= ce_start_date &
+        ce_date < ce_end_date) %>% 
+  mutate(study_eligible = as.character(study_eligible),
+         age_at_ce_under_limit = as.character(age_at_ce_under_limit),
+         has_visit_in_followup_period = ifelse(has_visit_in_followup_period==1, TRUE, FALSE))
+## Want this table to be: percent of each cohort with a pre visit, post visit, etc. 
+table1(~ study_eligible + 
+         age_at_ce_under_limit +
+         satisfied_prior_visit_criteria + 
+         has_visit_in_followup_period + 
+         cohort_entry_date_in_window +
+         has_visit_in_followup_period*satisfied_prior_visit_criteria | cohort_assignment, 
+       data= cohort_prematch)
+
+```
+
+<!-- ### Distribution of cohort entry dates, broken down by cohort group. Study eligible patients only.  -->
+
+<!-- ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=6} -->
+
+<!-- cohort_prematch <- results_tbl(paste0("ce", cohort_1_label, "unfiltered")) -->
+
+<!-- cohort_prematch %>%  -->
+<!--   filter(study_eligible ==1) %>%  -->
+<!--   ggplot() + -->
+<!--   geom_density(aes(x=ce_date, fill=cohort_assignment, alpha=0.2, color=cohort_assignment), position="stack") + -->
+<!--   theme_bw() + -->
+<!--   scale_fill_manual(values = wes_palette("FantasticFox1", n=6, type = "continuous")) + -->
+<!--   scale_color_manual(values = wes_palette("FantasticFox1", n=6, type = "continuous")) + -->
+<!--   theme(legend.position = "bottom") -->
+
+<!-- ``` -->
+
+<!-- Simplified version, removing any patient who had both infections within the study period: -->
+
+<!-- ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=6} -->
+
+<!-- cohort_prematch <- results_tbl(paste0("ce", cohort_1_label, "unfiltered")) -->
+
+<!-- cohort_prematch %>%  -->
+<!--   filter(study_eligible ==1) %>%  -->
+<!--   filter(!(cohort_assignment %in% c("Covid and influenza same day", "Influenza prior to covid", "Covid prior to influenza"))) %>%  -->
+<!--   ggplot() + -->
+<!--   geom_density(aes(x=ce_date, fill=cohort_assignment, alpha=0.2, color=cohort_assignment), position="dodge") + -->
+<!--   theme_bw() + -->
+<!--   scale_fill_manual(values = wes_palette("FantasticFox1", n=6, type = "continuous")) + -->
+<!--   scale_color_manual(values = wes_palette("FantasticFox1", n=6, type = "continuous")) + -->
+<!--   geom_vline(xintercept=as.Date("2021-12-01") ) + -->
+<!--   geom_vline(xintercept=as.Date("2023-03-01")  ) + -->
+<!--   theme(legend.position = "bottom") -->
+
+<!-- ``` -->
+
+### Follow up time from cohort entry
+
+The motivation for our outcomes of interest arose from clinically motivated signals in the data, namely, spikes in the return of common respiratory illnesses following the relaxation of pandemic-era restrictions. We have identified two specific outcome periods of interest, and have designed cohort entry periods that will align, more or less, with the outcome periods of interest. 
+
+The outcome periods of interest are:
+
+•	Any subsequent infection or any respiratory infection: December 2021 to March 2023
+  o	Proposed cohort entry period: Index infection from June 2021 to February 2023
+  
+•	RSV infections from September 2022 to February 2023
+  o	Proposed cohort entry period: Index infection from March 2022 to January 2023
+
+While it is impossible to capture a perfect cohort entry period that aligns with these outcome periods for certain, we have defined the cohort entry periods to begin up to six months prior to the start of the outcome period of interest, and to close one month prior to the end of the outcome period of interest. This way, we will capture all possible patient follow up that fall within the outcome periods of interest. 
+
+
+The following plots show the time series of COVID and Influenza index cases, in dark orange and blue shades, respectively. The *lighter shaded shadows* show the projected density of *follow up times* for each cohort, 30 to 180 days following the index period.
+The proposed outcome periods of interest are shown as horizontal lines at the bottom of the plot.
+  
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=6}
+
+cohort_prematch <- results_tbl(paste0("ce", cohort_1_label, "unfiltered"))
+
+## Distribution
+g <- cohort_prematch %>% 
+  filter(study_eligible ==1) %>% 
+  filter(!(cohort_assignment %in% c("Covid and influenza same day", "Influenza prior to covid", "Covid prior to influenza", "No infection"))) %>% 
+  # mutate(follow_up_30 = ce_date + days(30)) %>% 
+  # mutate(follow_up_180 = ce_date + days(180)) %>% 
+  ggplot() +
+  geom_density(aes(x=ce_date, fill=cohort_assignment, alpha=0.9, color=cohort_assignment), position="dodge")
+
+  
+p <- ggplot_build(g)
+
+dates <- p$data[[1]]$x
+density <- p$data[[1]]$density
+groups <- p$data[[1]]$group
+
+new_density_data <- data.frame("days_from_1970"=dates, "density"=density, "cohort"=groups) %>% 
+  mutate(dates = as.Date("1970-01-01") + days_from_1970)
+
+base_shift_plot <- new_density_data %>% 
+  pivot_wider(id_cols = c(dates), names_from = cohort, values_from = density, names_prefix = "cohort") %>% 
+  mutate(dates_shifted_max = dates + days(180)) %>%  #days
+  mutate(dates_shifted_min = dates + days(30)) %>%  #days
+  mutate(ymin_col = 0) %>% 
+  mutate(cohort1_shifted_min = lag(cohort1, n= 30)) %>% 
+  mutate(cohort1_shifted_max = lag(cohort1, n= 180)) %>% 
+  mutate(cohort2_shifted_min = lag(cohort2, n= 30)) %>% 
+  mutate(cohort2_shifted_max = lag(cohort2, n= 180)) %>% 
+  ggplot() +
+  # geom_line(aes(x=dates, y = cohort1, color="covid", alpha=0.9)) +
+  geom_ribbon(aes(x=dates, ymin = ymin_col, ymax = cohort1, fill="covid"), alpha=0.9) +
+  # geom_line(aes(x=dates_shifted_min, y = cohort1, color="covid outcomes")) +
+  geom_ribbon(aes(x=dates_shifted_min, ymin = ymin_col, ymax = cohort1, fill="covid"), alpha=0.3) +
+  # geom_line(aes(x=dates_shifted_max, y = cohort1, color="covid outcomes")) +
+  geom_ribbon(aes(x=dates_shifted_max, ymin = ymin_col, ymax = cohort1, fill="covid"), alpha=0.3) +
+  geom_ribbon(aes(xmin = dates_shifted_min, xmax=dates_shifted_max, y=cohort1, fill="covid"),  alpha=0.3) +
+  geom_ribbon(aes(x=dates, ymin = ymin_col, ymax = cohort2, fill="influenza"), alpha=0.9) +
+  # geom_line(aes(x=dates_shifted_min, y = cohort1, color="covid outcomes")) +
+  geom_ribbon(aes(x=dates_shifted_min, ymin = ymin_col, ymax = cohort2, fill="influenza"), alpha=0.3) +
+  # geom_line(aes(x=dates_shifted_max, y = cohort1, color="covid outcomes")) +
+  geom_ribbon(aes(x=dates_shifted_max, ymin = ymin_col, ymax = cohort2, fill="influenza"), alpha=0.3) +
+  geom_ribbon(aes(xmin = dates_shifted_min, xmax=dates_shifted_max, y=cohort2, fill="influenza"), alpha=0.3) +
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous"))  +
+  # geom_segment(aes(x=as.Date("2021-12-01"), xend =as.Date("2021-12-01"), y=0, yend=.01, 
+  #                  color= "Proposed general/respiratory infection outcome period"), size = 1.5) +
+  # geom_segment(aes(x=as.Date("2023-03-01"), xend =as.Date("2023-03-01"), y = 0, yend = .01,
+  #                   color= "Proposed general/respiratory infection outcome period"), size= 1.5) +
+  #   geom_segment(aes(x=as.Date("2021-12-01"), xend =as.Date("2023-03-01"), y=-0.0001, yend=-0.0001, 
+  #                  color= "Proposed general/respiratory infection outcome period"), size = 1.5) +
+  # # geom_segment(aes(x=as.Date("2022-09-01"), xend=as.Date("2022-09-01"), y=0, yend=.01,
+  # #                  color= "Proposed RSV outcome period"), size = 1.5) +
+  # # geom_segment(aes(x=as.Date("2023-02-02"), xend=as.Date("2023-02-02"), y=0, yend=.01,
+  # #                  color= "Proposed RSV outcome period"), size = 1.5) +
+  #   geom_segment(aes(x=as.Date("2022-09-01"), xend=as.Date("2023-02-02"), y=-0.00025, yend=-0.00025,
+  #                  color= "Proposed RSV outcome period"), size = 1.5) +
+  theme_bw() +
+  theme(legend.position = "bottom", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_x_date(breaks = "month") +
+  labs(x="", y="")
+
+base_shift_plot +
+    geom_segment(aes(x=as.Date("2021-12-01"), xend =as.Date("2023-03-01"), y=-0.0001, yend=-0.0001, 
+                   color= "Proposed general/respiratory infection outcome period"), size = 1.5) +
+    geom_segment(aes(x=as.Date("2022-09-01"), xend=as.Date("2023-02-02"), y=-0.00025, yend=-0.00025,
+                   color= "Proposed RSV outcome period"), size = 1.5)
+
+```
+
+
+### Proposed primary outcome periods
+
+Outcomes of interest have the following time anchors: 
+
+* Any subsequent infection: December 2021 to March 2023
+  * Proposed cohort entry period: Index infection from June 2021 to February 2023
+
+* Any respiratory infection: December 2021 to March 2023 
+  * Proposed cohort entry period: Index infection from June 2021 to February 2023
+
+* RSV infections from September 2022 to February 2023
+  * Proposed cohort entry period: Index infection from March 2022 to January 2023
+  
+The following plots visualize what the proposed cohort entry and subsequent outcome periods of interest will look like.
+
+The following plots show the time series of COVID and Influenza index cases, in dark orange and blue shades, respectively. The *lighter shaded shadows* show the projected density of *follow up times* for each cohort, 30 to 180 days following the index period.
+
+The proposed outcome periods of interest are shown as *pink* horizontal lines at the bottom of the plot.
+
+The suggested cohort entry periods and subsequent follow up periods are shown as pairs of dark and light dashed lines.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=6}
+
+cohort_prematch <- results_tbl(paste0("ce", cohort_1_label, "unfiltered"))
+
+# cohort_prematch %>% 
+#   filter(study_eligible ==1) %>% 
+#   filter(!(cohort_assignment %in% c("Covid and influenza same day", "Influenza prior to covid", "Covid prior to influenza", "No infection"))) %>% 
+  # ggplot() +
+
+base_shift_plot +
+  # geom_segment(aes(x=as.Date("2021-12-01"), xend =as.Date("2021-12-01"), y=0, yend=.01, 
+  #                  color= "Proposed general/respiratory infection outcome period"), size = 2) +
+  # geom_segment(aes(x=as.Date("2023-03-01"), xend =as.Date("2023-03-01"), y = 0, yend = .01,
+  #                   color= "Proposed general/respiratory infection outcome period"), size= 2) +
+  geom_segment(aes(x=as.Date("2021-06-01"), xend=as.Date("2021-06-01"), y=0, yend=.01,
+                   color= "CE period (General/respiratory)"), linetype = "dashed", size = 2) +
+  geom_segment(aes(x=as.Date("2023-01-31"), xend=as.Date("2023-01-31"), y=0, yend=.01,
+                   color= "CE period (General/respiratory)"), linetype = "dashed", size = 2) +
+  geom_segment(aes(x=as.Date("2021-07-01"), xend=as.Date("2021-07-01"), y=0, yend=.01, #follow up
+                   color= "Follow up period"), linetype = "dashed", size = 2) +
+  geom_segment(aes(x=as.Date("2023-08-01"), xend=as.Date("2023-08-01"), y=0, yend=.01, #follow up
+                   color= "Follow up period"), linetype = "dashed", size = 2) +
+  geom_segment(aes(x=as.Date("2021-12-01"), xend =as.Date("2023-03-01"), y=-0.0001, yend=-0.0001, 
+                   color= "Proposed general/respiratory infection outcome period"), size = 1.5) +
+  geom_segment(aes(x=as.Date("2021-06-01"), xend =as.Date("2023-02-01"), y=-0.00025, yend=-0.00025, 
+                   color= "CE period (General/respiratory)"), size = 1.5, linetype = "dashed") +
+  geom_segment(aes(x=as.Date("2021-07-01"), xend=as.Date("2023-08-01"), y=-0.0004, yend=-.0004, #follow up
+                 color= "Follow up period"), linetype = "dashed", size = 2) +
+  scale_color_manual(name = "key", values = c("Proposed general/respiratory infection outcome period" = "pink", "RSV outcome" = "darkorange",
+                                                     "CE period (General/respiratory)" = "blue", "CE period (RSV)" = "orange",
+                                              "Follow up period" = "lightblue"))  +
+    ggtitle("Proposed outcome period and CE period:General or Respiratory outcomes")
+  # geom_density(aes(x=ce_date, fill=cohort_assignment, color=cohort_assignment),alpha=0.6, position="dodge") +
+
+# cohort_prematch %>% 
+#   filter(study_eligible ==1) %>% 
+#   filter(!(cohort_assignment %in% c("Covid and influenza same day", "Influenza prior to covid", "Covid prior to influenza"))) %>% 
+#   ggplot() +
+#   geom_segment(aes(x=as.Date("2021-12-01"), xend =as.Date("2021-12-01"), y=0, yend=.01, 
+#                    color= "General/respiratory infection outcome"), size = 2) +
+#   geom_segment(aes(x=as.Date("2023-03-01"), xend =as.Date("2023-03-01"), y = 0, yend = .01,
+#                     color= "General/respiratory infection outcome"), size= 2) +
+#   geom_segment(aes(x=as.Date("2021-06-01"), xend=as.Date("2021-06-01"), y=0, yend=.01,
+#                    color= "CE period (General/respiratory)"), linetype = "dashed", size = 2) +
+#   geom_segment(aes(x=as.Date("2023-01-31"), xend=as.Date("2023-01-31"), y=0, yend=.01,
+#                    color= "CE period (General/respiratory)"), linetype = "dashed", size = 2) +
+#   geom_segment(aes(x=as.Date("2022-09-01"), xend=as.Date("2022-09-01"), y=0, yend=.01,
+#                    color= "RSV outcome"), size = 2) +
+#   geom_segment(aes(x=as.Date("2023-02-02"), xend=as.Date("2023-02-02"), y=0, yend=.01,
+#                    color= "RSV outcome"), size = 2) +
+#   geom_segment(aes(x=as.Date("2022-03-01"),xend=as.Date("2022-03-01"),y=0, yend=.01,
+#                    color= "CE period (RSV)"), linetype = "dashed", size = 2) +
+#   geom_segment(aes(x=as.Date("2023-01-01"), xend=as.Date("2023-01-01"),y=0, yend=.01,
+#                    color= "CE period (RSV)"), linetype = "dashed", size = 2) +
+#   scale_color_manual(name = "key", values = c("General/respiratory infection outcome" = "blue", "RSV outcome" = "darkorange",
+#                                                      "CE period (General/respiratory)" = "lightblue", "CE period (RSV)" = "orange")) +
+#   geom_density(aes(x=ce_date, fill=cohort_assignment, alpha=0.9, color=cohort_assignment), position="dodge") +
+#   theme_bw() +
+#   scale_fill_manual(values = wes_palette("FantasticFox1", n=6, type = "continuous")) +
+#   theme(legend.position = "bottom") +
+#   ggtitle("Outcome period: general/respiratory infections")
+
+
+  # geom_ribbon(aes(xmin = dates_shifted_min, xmax=dates_shifted_max, y=cohort1)) +
+  # geom_line(aes(x=dates, y = cohort2, color="influenza")) 
+
+# new_density_data %>% 
+#   pivot_wider(id_cols = c(dates), names_from = cohort, values_from = density, names_prefix = "cohort") %>% 
+#   mutate(dates_shifted_max = dates + 180) %>%  #days
+#   mutate(dates_shifted_min = dates + 30) %>%  #days
+#   mutate(ymin_col = 0) %>% 
+#   mutate(cohort2_shifted_min = lag(cohort2, n= 30)) %>% 
+#   mutate(cohort2_shifted_max = lag(cohort2, n= 180)) %>% 
+#   ggplot() +
+#   # geom_line(aes(x=dates, y = cohort1, color="covid", alpha=0.9)) +
+#   geom_ribbon(aes(x=dates, ymin = ymin_col, ymax = cohort2, fill="influenza", alpha=0.9)) +
+#   # geom_line(aes(x=dates_shifted_min, y = cohort1, color="covid outcomes")) +
+#   geom_ribbon(aes(x=dates_shifted_min, ymin = ymin_col, ymax = cohort2, fill="influenza", alpha=0.7)) +
+#   # geom_line(aes(x=dates_shifted_max, y = cohort1, color="covid outcomes")) +
+#   geom_ribbon(aes(x=dates_shifted_max, ymin = ymin_col, ymax = cohort2, fill="influenza", alpha=0.7)) +
+#   geom_ribbon(aes(xmin = dates_shifted_min, xmax=dates_shifted_max, y=cohort2, alpha=0.7, fill="influenza")) +
+#   scale_fill_manual(values = wes_palette("FantasticFox1", n=6, type = "continuous"))  +
+#   theme_bw() +
+#   theme(legend.position = "bottom")
+
+# cohort_prematch %>% 
+#   filter(study_eligible ==1) %>% 
+#   filter(!(cohort_assignment %in% c("Covid and influenza same day", "Influenza prior to covid", "Covid prior to influenza", "No infection"))) %>% 
+#   ggplot() +
+#   
+
+base_shift_plot +
+  # geom_segment(aes(x=as.Date("2022-09-01"), xend=as.Date("2022-09-01"), y=0, yend=.01,
+  #                  color= "Proposed RSV outcome period"), size = 2) +
+  # geom_segment(aes(x=as.Date("2023-02-02"), xend=as.Date("2023-02-02"), y=0, yend=.01,
+  #                  color= "Proposed RSV outcome period"), size = 2) +
+  geom_segment(aes(x=as.Date("2022-03-01"),xend=as.Date("2022-03-01"),y=0, yend=.01,
+                   color= "CE period (RSV)"), linetype = "dashed", size = 2) +
+  geom_segment(aes(x=as.Date("2023-01-01"), xend=as.Date("2023-01-01"),y=0, yend=.01,
+                   color= "CE period (RSV)"), linetype = "dashed", size = 2) +
+    geom_segment(aes(x=as.Date("2022-09-01"), xend =as.Date("2023-02-01"), y=-0.0001, yend=-0.0001, 
+                   color= "Proposed RSV outcome period"), size = 1.5) +
+  geom_segment(aes(x=as.Date("2022-03-01"), xend =as.Date("2023-01-01"), y=-0.00025, yend=-0.00025, 
+                   color= "CE period (RSV)"), size = 1.5, linetype = "dashed") +
+    geom_segment(aes(x=as.Date("2022-04-01"), xend=as.Date("2022-04-01"), y=0, yend=.01, #follow up
+                   color= "Follow up period"), linetype = "dashed", size = 2) +
+  geom_segment(aes(x=as.Date("2023-07-01"), xend=as.Date("2023-07-01"), y=0, yend=.01, #follow up
+                   color= "Follow up period"), linetype = "dashed", size = 2) +
+      geom_segment(aes(x=as.Date("2022-04-01"), xend=as.Date("2023-07-01"), y=-0.0004, yend=-.0004, #follow up
+                   color= "Follow up period"), linetype = "dashed", size = 2) +
+  scale_color_manual(name = "key", values = c("General/respiratory infection outcome" = "blue", "Proposed RSV outcome period" = "pink",
+                                                     "CE period (General/respiratory)" = "lightblue", "CE period (RSV)" = "darkorange",
+                                              "Follow up period" = "orange")) +
+  ggtitle("Proposed outcome period and CE Period: RSV")
+
+```
+
+
+### Table 1 of study eligible patients
+
+To help with understanding what we will obtain once we finalize the cohorts, the following is a Table 1 of demographic and study-related matching criteria variables. The cohort in the following table is limited to patients satisfying the study eligbility criteria (shown above), and only patients with covid, influenza, or no infection are shown (the other overlapping cohort patients have been removed). This table describes age, sex, race/ethnicity, and utilization data (coarse grained, will be fine-tuned). Cohort entry week distributions are shown in a figure below.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+cohort_prematch_demo <- results_tbl(paste0("ce", cohort_1_label, "unfiltered_demo")) %>% 
+  filter(cohort_assignment %in% c("Covid", "Influenza", "No infection")) %>% 
+  filter(study_eligible==1) %>% 
+  mutate(complex_chronic_flag = mock_medical_complexity)
+
+table1(~ sex_cat + race_eth_cat + age_cat_at_ce + visit_type_inpatient_or_ed +
+         visit_type_outpatient + visit_type_admin_other_telemed | cohort_assignment,
+       data = cohort_prematch_demo)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=12, fig.height=4}
+cohort_prematch_demo <- results_tbl(paste0("ce", cohort_1_label, "unfiltered_demo")) %>% 
+  filter(cohort_assignment %in% c("Covid", "Influenza", "No infection")) %>% 
+  filter(study_eligible==1) %>% 
+  mutate(complex_chronic_flag = mock_medical_complexity)
+
+cohort_prematch_demo %>% 
+  group_by(cohort_entry_week, cohort_assignment) %>% 
+  mutate(cohort_entry_week = as.Date(cohort_entry_week)) %>% 
+  summarise(n_pats=n()) %>% 
+  ungroup() %>% 
+  group_by(cohort_assignment) %>% 
+  mutate(total_cohort = sum(n_pats)) %>% 
+  mutate(prop_pats = as.numeric(n_pats)/as.numeric(total_cohort)) %>% 
+  ggplot() +
+  geom_bar(aes(x=cohort_entry_week, y = prop_pats, fill=cohort_assignment, alpha=0.5), stat="identity", position="dodge") +
+  theme_bw() +
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=6, type = "continuous")) +
+  labs(x="Cohort entry week", y="Proportion of patients in cohort group") +
+  geom_vline(xintercept=as.Date("2021-12-01") ) +
+  geom_vline(xintercept=as.Date("2023-03-01")  ) +
+  theme(legend.position = "bottom")
+
+cohort_prematch_demo %>% 
+  group_by(cohort_entry_week, cohort_assignment) %>% 
+  mutate(cohort_entry_week = as.Date(cohort_entry_week)) %>% 
+  summarise(n_pats=n()) %>% 
+  ungroup() %>% 
+  group_by(cohort_assignment) %>% 
+  mutate(total_cohort = sum(n_pats)) %>% 
+  mutate(prop_pats = as.numeric(n_pats)/as.numeric(total_cohort)) %>% 
+  ggplot() +
+  geom_bar(aes(x=cohort_entry_week, y = n_pats, fill=cohort_assignment, alpha=0.5), stat="identity", position="dodge") +
+  theme_bw() +
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=6, type = "continuous")) +
+  labs(x="Cohort entry week", y="Number of patients in cohort group") +
+  geom_vline(xintercept=as.Date("2021-12-01") ) +
+  geom_vline(xintercept=as.Date("2023-03-01")  ) +
+  theme(legend.position = "bottom")
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=12, fig.height=8}
+cohort_prematch_demo %>% 
+  group_by(cohort_entry_week, cohort_assignment, age_cat_at_ce) %>% 
+  mutate(cohort_entry_week = as.Date(cohort_entry_week)) %>% 
+  summarise(n_pats=n()) %>% 
+  ungroup() %>% 
+  group_by(cohort_assignment) %>% 
+  mutate(total_cohort = sum(n_pats)) %>% 
+  mutate(prop_pats = as.numeric(n_pats)/as.numeric(total_cohort)) %>% 
+  ggplot() +
+  geom_bar(aes(x=cohort_entry_week, y = prop_pats, fill=cohort_assignment, alpha=0.5), stat="identity", position="dodge") +
+  theme_bw() +
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=6, type = "continuous")) +
+  labs(x="Cohort entry week", y="Proportion of patients in cohort group") +
+  facet_wrap(~age_cat_at_ce, ncol=2, scales = "free") +
+  labs(x="Date") +
+  theme(legend.position = "bottom")
+
+
+  
+```
+
+
+Comparative bar chart of matching variables broken down by cohort, to aid estimating if exact matching or propensity score matching is feasible. Counts are reporting on a log scale.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=12, fig.height=8}
+cohort_prematch_demo %>% 
+  pivot_longer(cols = c(sex_cat, race_eth_cat, age_cat_at_ce, complex_chronic_flag, visit_type_inpatient_or_ed,
+         visit_type_outpatient,visit_type_admin_other_telemed), names_to = "match_variable", values_to = "variable_value") %>% 
+  group_by(match_variable,
+           variable_value,
+           cohort_assignment) %>% 
+  summarise(n_pats=n_distinct(person_id)) %>% 
+  ggplot() +
+  geom_bar(aes(x=variable_value, y = n_pats, fill=cohort_assignment, color=cohort_assignment, alpha=0.2), stat="identity", position = "dodge") +
+  theme_bw() +
+  facet_wrap(~match_variable, scales = "free", ncol = 2) +
+  scale_y_continuous(trans="log10") +
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=6, type = "continuous")) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n=6, type = "continuous")) +
+  coord_flip() +
+  labs(x="Matching variable value", y="Number patients (log)") +
+  theme(legend.position = "bottom")
+
+```
+
+
+<!-- ## Temporal trends -->
+
+<!-- The aim of this section is to help select sub-time frames, along with using the data from above, to streamline research questions over specific surge periods, or at least become aware of the temporal patterns described by the data. -->
+
+<!-- Remember, we will ultimately be looking forward at future infections of the group/s that we select. This time series can be used both to select index date periods, as well as to hypothesize about what subsequent infection distributions may look like given a spec ific time period for index dates. -->
+
+<!-- The vertical axis shows stacked density distributions of incidence cases of each disease by week, normalized over the total number of instances of each disease over all time. -->
+
+<!-- The final set of 3 plots are supplementary: they break the patients into 3 categories according to how many total unique diseases (of the 3 investigated) a patient had, so either 1, 2, or all 3, and describes the same temporal density trends. The idea here is, do we see a different trend in incidence, for patients who are infected with more things. -->
+
+<!-- TODO -->
+
+<!-- ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=12, fig.height=6} -->
+<!-- disease_summary_1 %>%  -->
+<!--     ggplot() + -->
+<!--     geom_bar(aes(x=evidence_week, y=as.numeric(n_week)/as.numeric(total_disease_all_time), fill=disease), stat="identity", -->
+<!--              position="stack") + -->
+<!--     theme_bw() + -->
+<!--     scale_fill_brewer(palette = "Set1")+ -->
+<!--     scale_x_date(date_breaks = "months" , date_labels = "%b-%y") + -->
+<!--     theme(text = element_text(size=12), -->
+<!--           axis.text.x = element_text(angle=90, hjust=1)) + -->
+<!--   labs(x="Evidence week", y = "Density") -->
+<!--   ## Group by concept and week, and number of coinfections, count  by week, unique patient count per week of each disease -->
+<!--   ## Plot: geom_bar(aes(x=week, y = n/r, fill=disease), position="stack") + facet_wrap(~coinfected_pats) -->
+<!--   disease_summary_1 %>%  -->
+<!--     filter(!is.na(n_diseases_unique)) %>%  -->
+<!--     ggplot() + -->
+<!--     geom_bar(aes(x=as.Date(evidence_week), y=as.numeric(n_class)/as.numeric(total_disease_all_time), fill=disease), stat="identity", -->
+<!--              position="stack") + -->
+<!--     facet_wrap(~n_diseases_unique, ncol = 3, scales = "free") + -->
+<!--     theme_bw() + -->
+<!--     scale_fill_brewer(palette = "Set1")+ -->
+<!--     scale_x_date(date_breaks = "months" , date_labels = "%b-%y") + -->
+<!--     theme(text = element_text(size=12), -->
+<!--           axis.text.x = element_text(angle=90, hjust=1)) + -->
+<!--     labs(x="Evidence week", y="Density") -->
+<!-- ``` -->
+

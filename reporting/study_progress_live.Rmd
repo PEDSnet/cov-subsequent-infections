@@ -1,0 +1,253 @@
+---
+title: "Study Progress: Subsequent Infections following SARS-CoV-2 in Children"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+---
+
+
+This is a living document that is designed to be saved at any amount of points throughout the study, and can be referenced as a state report document with envisioned timelines, findings so far, decisions that have or have not been made, interesting plots, cohort information, and anlaysis information.
+
+# Study progress as of Jan 22nd, 2024
+
+
+```{r include=FALSE}
+# Default taken from R notebook behavior: when knitting, wd will always be location of notebook
+base_dir <- '..'
+Sys.setenv(PEDSNET_SKIP_REQUEST_EXECUTION=1)
+try(source('../site/run.R')) # May not be able to make db connection
+
+# Set to "local" to read data from ../results, or another value to read from db
+data_source <- if_else(config('execution_mode') == 'distribution', 'local', 'not_local')
+
+require(tibble)
+require(knitr)
+require(kableExtra)
+require(readr)
+require(table1)
+require(ggplot2)
+require(tidyverse)
+require(lubridate)
+library(wesanderson)
+
+get_results <- function(tbl_name) {
+  if (data_source == 'local') {
+    rslt <- read_csv(paste0('../results/', tbl_name, '.csv'))
+  }
+  else {
+    rslt <- results_tbl(tbl_name) %>% collect()
+  }
+  rslt
+}
+
+prettify_kable <- function(data) {
+  rslt <- data %>% kable(digits = 4, format.args = list(big.mark = ','))
+  if (knitr::is_html_output()) rslt <- rslt %>%
+    kable_styling(bootstrap_options = c("striped", "hover")) %>%
+    column_spec(1, bold = T, border_right = T)
+  rslt
+}
+
+```
+
+## Latest updates
+
+2/2/2024: Thinking that we need to do some extra DQ before developing some of the main outcome variables. For example, defining the outcome of "Has an incident non-covid respiratory diagnosis during the post-acute period following index case of SARS-CoV-2" requires that we properly screen a patient for proper follow-up after the index infection, making sure that the outcome (subsequent infection) is not confounded by, for example, a bunch of repeat visits for the same index infection resulting in the mis-coding of the subsequent infection.
+
+Noticed that in some early DQ, when we look at the `days until outcome`, the distribution is pressed very far left at 30 days, implying that there is significant density at days < 30, meaning that these diagnoses may not be occurring incidently during the post-acute period.
+
+Need to apply some diagnosis clustering logic to roll-up conditions into the acute period, distinct visits for new incident diagnoses, before identifying the outcomes (can't just use the codeset point blank, though it's a start).
+
+## Cohort
+
+Cohort Design:
+
+Inclusion Criteria:
+
+COVID cohort:
+
+1)	Children < 5 years of age at time of first test date or COVID code within the study period
+
+2)	SARS-CoV-2 positive by antigen or PCR or
+COVID-specific diagnosis code or
+MIS-C/PASC code, with index date imputed if not available to 60 days before
+
+3)	At least 1 prior visit in the preceding 18 months to define active population that interacts with health system, or appropriate utilization criteria for infants, and at least one visit during the follow up period 1-6 months after cohort entry date / index date
+
+Influenza comparison cohort:
+
+1)	Children < 5 years of age at time of first test date within the study period
+
+2)	Evidence of influenza (lab confirmed or diagnosis code)
+
+3)	At least 1 prior visit in the preceding 18 months to define active population that interacts with health system, or appropriate utilization criteria for infants, and at least one visit during the follow up period 1-6 months after cohort entry date / index date
+
+Exclusion Criteria:
+
+1) No serology positive if Influenza patient, or if covid patient, cannot be serology positive before the index covid event
+
+2) No MISC or PASC code if Influenza patient (without covid)
+
+### Cohort entry dates, by group, so far
+
+Cohort with all entry criteria and washout criteria applied. Distributions of cohort entry dates over time, separated by sub cohort group:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=5, fig.height=5}
+
+results_tbl("base_cohort") %>% 
+  ggplot() + 
+  geom_density(aes(x=ce_date, fill=sub_cohort), alpha=0.5, position="stack") + 
+  facet_wrap(~sub_cohort, ncol = 1) + 
+  theme(legend.position = "none") +
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=10, type = "continuous"))  +
+  theme_bw() +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_x_date(breaks = "month") +
+  labs(x="", y="")
+
+
+```
+
+### Timescales for clinical focus
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=6}
+
+cohort_1_label = "_04211023_"
+
+cohort_prematch <- results_tbl(paste0("ce", cohort_1_label, "unfiltered"))
+
+cohort_prematch <- results_tbl("base_cohort") %>% mutate(cohort_assignment = sub_cohort)
+
+## Distribution
+g <- cohort_prematch %>% 
+  # filter(study_eligible ==1) %>% 
+  filter(!(cohort_assignment %in% c("Covid and influenza same day", "Influenza prior to covid", "Covid prior to influenza", "No infection"))) %>% 
+  # mutate(follow_up_30 = ce_date + days(30)) %>% 
+  # mutate(follow_up_180 = ce_date + days(180)) %>% 
+  ggplot() +
+  geom_density(aes(x=ce_date, fill=cohort_assignment, alpha=0.9, color=cohort_assignment), position="dodge")
+
+  
+p <- ggplot_build(g)
+
+dates <- p$data[[1]]$x
+density <- p$data[[1]]$density
+groups <- p$data[[1]]$group
+
+new_density_data <- data.frame("days_from_1970"=dates, "density"=density, "cohort"=groups) %>% 
+  mutate(dates = as.Date("1970-01-01") + days_from_1970)
+
+base_shift_plot <- new_density_data %>% 
+  pivot_wider(id_cols = c(dates), names_from = cohort, values_from = density, names_prefix = "cohort") %>% 
+  mutate(dates_shifted_max = dates + days(180)) %>%  #days
+  mutate(dates_shifted_min = dates + days(30)) %>%  #days
+  mutate(ymin_col = 0) %>% 
+  mutate(cohort1_shifted_min = lag(cohort1, n= 30)) %>% 
+  mutate(cohort1_shifted_max = lag(cohort1, n= 180)) %>% 
+  mutate(cohort2_shifted_min = lag(cohort2, n= 30)) %>% 
+  mutate(cohort2_shifted_max = lag(cohort2, n= 180)) %>% 
+  ggplot() +
+  # geom_line(aes(x=dates, y = cohort1, color="covid", alpha=0.9)) +
+  geom_ribbon(aes(x=dates, ymin = ymin_col, ymax = cohort1, fill="covid"), alpha=0.9) +
+  # geom_line(aes(x=dates_shifted_min, y = cohort1, color="covid outcomes")) +
+  geom_ribbon(aes(x=dates_shifted_min, ymin = ymin_col, ymax = cohort1, fill="covid"), alpha=0.3) +
+  # geom_line(aes(x=dates_shifted_max, y = cohort1, color="covid outcomes")) +
+  geom_ribbon(aes(x=dates_shifted_max, ymin = ymin_col, ymax = cohort1, fill="covid"), alpha=0.3) +
+  geom_ribbon(aes(xmin = dates_shifted_min, xmax=dates_shifted_max, y=cohort1, fill="covid"),  alpha=0.3) +
+  geom_ribbon(aes(x=dates, ymin = ymin_col, ymax = cohort2, fill="influenza"), alpha=0.9) +
+  # geom_line(aes(x=dates_shifted_min, y = cohort1, color="covid outcomes")) +
+  geom_ribbon(aes(x=dates_shifted_min, ymin = ymin_col, ymax = cohort2, fill="influenza"), alpha=0.3) +
+  # geom_line(aes(x=dates_shifted_max, y = cohort1, color="covid outcomes")) +
+  geom_ribbon(aes(x=dates_shifted_max, ymin = ymin_col, ymax = cohort2, fill="influenza"), alpha=0.3) +
+  geom_ribbon(aes(xmin = dates_shifted_min, xmax=dates_shifted_max, y=cohort2, fill="influenza"), alpha=0.3) +
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous"))  +
+  # geom_segment(aes(x=as.Date("2021-12-01"), xend =as.Date("2021-12-01"), y=0, yend=.01, 
+  #                  color= "Proposed general/respiratory infection outcome period"), size = 1.5) +
+  # geom_segment(aes(x=as.Date("2023-03-01"), xend =as.Date("2023-03-01"), y = 0, yend = .01,
+  #                   color= "Proposed general/respiratory infection outcome period"), size= 1.5) +
+  #   geom_segment(aes(x=as.Date("2021-12-01"), xend =as.Date("2023-03-01"), y=-0.0001, yend=-0.0001, 
+  #                  color= "Proposed general/respiratory infection outcome period"), size = 1.5) +
+  # # geom_segment(aes(x=as.Date("2022-09-01"), xend=as.Date("2022-09-01"), y=0, yend=.01,
+  # #                  color= "Proposed RSV outcome period"), size = 1.5) +
+  # # geom_segment(aes(x=as.Date("2023-02-02"), xend=as.Date("2023-02-02"), y=0, yend=.01,
+  # #                  color= "Proposed RSV outcome period"), size = 1.5) +
+  #   geom_segment(aes(x=as.Date("2022-09-01"), xend=as.Date("2023-02-02"), y=-0.00025, yend=-0.00025,
+  #                  color= "Proposed RSV outcome period"), size = 1.5) +
+  theme_bw() +
+  theme(legend.position = "bottom", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_x_date(breaks = "month") +
+  labs(x="", y="")
+
+base_shift_plot +
+    geom_segment(aes(x=as.Date("2021-12-01"), xend =as.Date("2023-03-01"), y=-0.0001, yend=-0.0001, 
+                   color= "Proposed general/respiratory infection outcome period"), size = 1.5) +
+    geom_segment(aes(x=as.Date("2022-09-01"), xend=as.Date("2023-02-02"), y=-0.00025, yend=-0.00025,
+                   color= "Proposed RSV outcome period"), size = 1.5)
+
+
+
+base_shift_plot +
+  # geom_segment(aes(x=as.Date("2021-12-01"), xend =as.Date("2021-12-01"), y=0, yend=.01, 
+  #                  color= "Proposed general/respiratory infection outcome period"), size = 2) +
+  # geom_segment(aes(x=as.Date("2023-03-01"), xend =as.Date("2023-03-01"), y = 0, yend = .01,
+  #                   color= "Proposed general/respiratory infection outcome period"), size= 2) +
+  geom_segment(aes(x=as.Date("2021-06-01"), xend=as.Date("2021-06-01"), y=0, yend=.01,
+                   color= "CE period (General/respiratory)"), linetype = "dashed", size = 2) +
+  geom_segment(aes(x=as.Date("2023-01-31"), xend=as.Date("2023-01-31"), y=0, yend=.01,
+                   color= "CE period (General/respiratory)"), linetype = "dashed", size = 2) +
+  geom_segment(aes(x=as.Date("2021-07-01"), xend=as.Date("2021-07-01"), y=0, yend=.01, #follow up
+                   color= "Follow up period"), linetype = "dashed", size = 2) +
+  geom_segment(aes(x=as.Date("2023-08-01"), xend=as.Date("2023-08-01"), y=0, yend=.01, #follow up
+                   color= "Follow up period"), linetype = "dashed", size = 2) +
+  geom_segment(aes(x=as.Date("2021-12-01"), xend =as.Date("2023-03-01"), y=-0.0001, yend=-0.0001, 
+                   color= "Proposed general/respiratory infection outcome period"), size = 1.5) +
+  geom_segment(aes(x=as.Date("2021-06-01"), xend =as.Date("2023-02-01"), y=-0.00025, yend=-0.00025, 
+                   color= "CE period (General/respiratory)"), size = 1.5, linetype = "dashed") +
+  geom_segment(aes(x=as.Date("2021-07-01"), xend=as.Date("2023-08-01"), y=-0.0004, yend=-.0004, #follow up
+                 color= "Follow up period"), linetype = "dashed", size = 2) +
+  scale_color_manual(name = "key", values = c("Proposed general/respiratory infection outcome period" = "pink", "RSV outcome" = "darkorange",
+                                                     "CE period (General/respiratory)" = "blue", "CE period (RSV)" = "orange",
+                                              "Follow up period" = "lightblue"))  +
+    ggtitle("Proposed outcome period and CE period:General or Respiratory outcomes")
+
+```
+
+
+## Codesets 
+
+### In development
+
+* RSV -- diagnosis `dx_rsv`
+
+* RSV -- lab confirmed `lab_rsv`
+
+* Any infection (diagnosis) -- `dx_any_infection`
+
+* Influenza (diagnosis) -- `dx_influenza`
+
+* Influenza (lab-confirmed) -- `lab_influenza_filtered`
+
+
+### Available
+
+* Respiratory infection -- `dx_noncov_resp_infections`
+
+### To do
+
+* Any infection (lab, if possible, but may be way too broad/difficult) -- `lab_any_infection`
+
+* Respiratory infection (lab, if possible) -- `lab_respiratory`
+
+* Lower respiratory tract infections (may be flag on existing general respiratory codesets, for `dx` and `lab`)
+
+* Injury `dx_injury`
+
+* Poisoning `dx_poisoning`
+
+
+
+
+

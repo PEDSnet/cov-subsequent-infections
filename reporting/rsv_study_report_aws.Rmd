@@ -1,0 +1,799 @@
+---
+title: "Subsequent Infections - RSV Study"
+date: "`r format(Sys.time(), '%m-%d-%y')`"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+---
+
+Report for cohort information and basic RSV outcomes data specific to the RSV outcome study.
+
+```{r include=FALSE}
+# Default taken from R notebook behavior: when knitting, wd will always be location of notebook
+base_dir <- '..'
+Sys.setenv(PEDSNET_SKIP_REQUEST_EXECUTION=1)
+try(source('../site/run.R')) # May not be able to make db connection
+
+# Set to "local" to read data from ../results, or another value to read from db
+data_source <- if_else(config('execution_mode') == 'distribution', 'local', 'not_local')
+
+require(tibble)
+require(knitr)
+require(kableExtra)
+require(readr)
+require(table1)
+require(ggplot2)
+require(tidyverse)
+require(lubridate)
+library(wesanderson)
+
+get_results <- function(tbl_name) {
+  if (data_source == 'local') {
+    rslt <- read_csv(paste0('../results/', tbl_name, '.csv'))
+  }
+  else {
+    rslt <- results_tbl(tbl_name) %>% collect()
+  }
+  rslt
+}
+
+
+prettify_kable <- function(data, indents = list()) {
+  
+  if (length(indents)==0) {
+      data %>% 
+        kbl(digits = 2, format.args = list(big.mark = ',')) %>%
+        kable_classic(full_width = F, html_font = "Arial") %>% 
+        kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>% 
+        column_spec(1, bold = F, border_right = T)
+  } else {
+      data %>% 
+        kbl(digits = 2, format.args = list(big.mark = ',')) %>%
+        kable_classic(full_width = F, html_font = "Arial") %>% 
+        kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>% 
+        add_indent(indents) %>% 
+        column_spec(1, bold = F, border_right = T)
+  }
+
+  # 
+  # data %>% 
+  #   kable(digits = 2, format.args = list(big.mark = ',')) %>% 
+  #   kable_styling(bootstrap_options = c("striped", "hover")) %>% 
+  #   column_spec(1, bold = T, border_right = T)
+}
+
+  postacute_min_start_date = as.Date("2022-04-01")
+  postacute_max_end_date = as.Date("2023-01-01")
+  
+  cohort_entry_start_date = as.Date("2022-03-01")
+  cohort_entry_end_date = as.Date("2022-07-01")
+  
+  cohort_1_label = "rsv_study_cohort"
+  # cohort_1_label = "sample_pats"
+  
+  ### Step 1: Analysis of time-to-outcome for RSV outcomes
+  
+  ## Saved table with exclusion reasons
+  exclusion_reasons <- results_tbl(paste0(cohort_1_label, "_w_exclusion_reasons"))
+  
+  attrition <- results_tbl(paste0(cohort_1_label, "_attrition"))
+  
+  final_cohort_demo <- results_tbl(paste0(cohort_1_label, "_cohort_demo"))
+  
+  rsv_outcomes <- results_tbl(paste0(cohort_1_label, "_rsv_outcomes"))
+  
+  cohort_with_rsv_outcomes <-
+    final_cohort_demo %>% 
+    left_join(rsv_outcomes, by="person_id")
+  
+  analytic_dataset <- results_tbl(paste0(cohort_1_label, "_analytic_dataset"))
+  
+  ## Can do filtering here for if covid date was imputed or not, already flagged 
+
+
+```
+
+# Attrition
+
+This attrition table considers the cohort entry period to be defined from *March 1, 2022* to *July 1, 2022*. 
+This means that the study outcome window will extend from *April 1, 2022* to *January 1, 2023*.
+
+## Attrition steps for cohort inclusion 
+
+Attrition based on cohort inclusion criteria. Inclusion criteria were computed according to the following rules.
+
+* Patients under 6 years old with at least one visit during cohort entry period (Jan 1 - July 1, 2022, may be tightened as desired)
+
+* Had evidence of either SARS-CoV-2 infection, Influenza, or any other respiratory infection within the cohort entry period
+
+* Had at least 1 visit within 18 months of index date, and at least 1 visit in the 1-6 months following the index date (follow up period)
+
+Index sub-cohort group was selected according to the following logic:
+
+* Select as initial index type and date the *earliest evidence of SARS-CoV-2 or Influenza or other ARI*
+
+* If a patient's index category is an *other ARI* but they *have evidence of SARS-CoV-2 or Influenza within 7 days*, update the index category to SARS-CoV-2/Influenza accordingly, but keep the index date the same as the preliminary ARI diagnosis
+
+* Exclusions:
+
+  * No prior SARS-CoV-2 ever, via test, diagnosis, or serology positive
+  
+  * No Influenza within pre-acute or acute period (6 months before index)
+  
+  * No prior RSV (outcome) or RSV within acute period
+  
+  * No co-infection of Influenza and SARS-Cov-2 within acute period
+  
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+# TODO fix this so the steps are right
+
+attrition_ordered <- attrition %>% 
+  mutate(ordering = case_when(
+    cohort == "Patients under 6 years old with at least 1 visit during CE period" ~ 1,
+    cohort == "Had at least 1 of COVID, influenza, and/or other respiratory infection event during CE period" ~ 2,
+    cohort == "Had COVID during CE period" ~ 3,
+    cohort == "Had influenza during CE period" ~ 4,
+    cohort == "Had other respiratory infection during CE period" ~ 5,
+    cohort == "Meets utilization inclusion criteria" ~ 6,
+    cohort == "Not excluded due to overlapping index infections" ~ 7,
+    cohort == "Final COVID sub-cohort" ~ 8,
+    cohort == "Final Influenza sub-cohort" ~ 9,
+    cohort == "Final Other respiratory sub-cohort" ~ 10,
+    TRUE ~ 0
+  ))
+
+
+attrition_ordered %>%
+  select("Attrition step" = cohort, persons, ordering) %>%
+  filter(ordering > 0) %>%
+  arrange(ordering) %>%
+  select(-ordering) %>%
+  prettify_kable(c(3, 4, 5, 8, 9, 10))
+
+
+```
+
+
+## Attrition following outcome washouts
+
+Patients with the outcome (RSV infection evidence) either prior to or during the acute phase of their index infection will be excluded.
+However, we may need to finalize the start of the post-acute period (compared to the acute period) before finalizing outcome-based cohort exclusions.
+
+See the following table.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=5}
+
+final_attrition_groups <-
+  analytic_dataset %>% 
+  mutate(exclude_based_on_rsv_outcome = ifelse(exclude_based_on_rsv_outcome==1, "Excluded for prior or acute RSV", "Not excluded" )) %>% 
+  mutate(lab_confirmed_index = ifelse(lab_confirmed==1, "Lab confirmed", "Diagnosis only")) %>% 
+  collect()
+
+table1(~ exclude_based_on_rsv_outcome + rsv_occurrence_period | sub_cohort*lab_confirmed_index,
+       data = final_attrition_groups,
+       overall = F, title = "Final attrition after outcome washout")
+
+final_attrition_groups %>%
+  ggplot() + 
+  geom_density(aes(x=days_from_index_to_rsv, fill=rsv_occurrence_period, color=rsv_occurrence_period), alpha=0.8) +
+  facet_wrap(~sub_cohort, scales="free", ncol=3) +
+    theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=7, type = "continuous")) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n=7, type = "continuous")) +
+  theme(legend.position = "bottom")
+
+
+```
+
+
+
+
+Breakdown of final cohort of patients based on sub-cohort (index infection). 
+
+Includes some DQ for sites cohort entry dates, looking strange (perhaps many index dates were shortened to the first of the month?)
+
+**Update: Known pipeline issue for condition start dates for diagnoses. Will be remediated in next report to address start dates**
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+analytic_dataset %>% 
+  # filter(exclude_based_on_rsv_outcome==0) %>% # TODO decide whether to exclude or not (yet) don't do any exclusion yet in this report
+  group_by(sub_cohort) %>% 
+  summarise(persons = n_distinct(person_id)) %>% 
+  select("Sub cohort" = sub_cohort, persons) %>% 
+  arrange(desc(persons)) %>% 
+  prettify_kable()
+
+## First: real time density plot of cohort entry dates
+analytic_dataset %>% 
+  # filter(exclude_based_on_rsv_outcome==0) %>% 
+  ggplot() +
+  geom_density(aes(x=ce_date, fill=sub_cohort), alpha=0.5) +
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  labs(x="Cohort entry date", y = "Density") +
+  theme(legend.position = "top")
+
+analytic_dataset %>% 
+  left_join(cdm_tbl("person") %>% select(person_id, site), by="person_id") %>% 
+  # filter(exclude_based_on_rsv_outcome==0) %>% 
+  group_by(ce_date, sub_cohort, site) %>% 
+  summarise(n=n_distinct(person_id)) %>% 
+  ungroup() %>% 
+  group_by(sub_cohort) %>% 
+  mutate(total_cohort = sum(n)) %>% 
+  ungroup() %>% 
+  mutate(date_prop = n/total_cohort) %>% 
+  ggplot() +
+  geom_bar(aes(x=ce_date, y=date_prop, fill=sub_cohort),stat="identity", position="dodge", alpha=0.5) +
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  labs(x="Cohort entry date", y = "Proportion of cohort") +
+  theme(legend.position = "top") 
+
+# analytic_dataset %>% 
+#   left_join(cdm_tbl("person") %>% select(person_id, site), by="person_id") %>% 
+#   filter(site %in% c("chop", "colorado", "emory", "stanford", "seattle", "vumc", "nemours", "ucsf")) %>% 
+#   filter(exclude_based_on_rsv_outcome==0) %>% 
+#   group_by(ce_date, sub_cohort, site) %>% 
+#   summarise(n=n_distinct(person_id)) %>% 
+#   ungroup() %>% 
+#   group_by(sub_cohort) %>% 
+#   mutate(total_cohort = sum(n)) %>% 
+#   ungroup() %>% 
+#   mutate(date_prop = n/total_cohort) %>% 
+#   ggplot() +
+#   geom_bar(aes(x=ce_date, y=n, fill=sub_cohort),stat="identity", position="dodge", alpha=0.5) +
+#   theme_bw() + 
+#   scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+#   labs(x="Cohort entry date", y = "Proportion of cohort") +
+#   theme(legend.position = "top") +
+#   facet_wrap(~site, scales = "free")
+
+
+```
+
+
+
+
+
+<details>
+  <summary>Exclusion reasons for non final cohort:</summary>
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+
+exclusion_tab_1 <- table1(~ washout_reason + exclude_reason | sub_cohort,
+                          data = exclusion_reasons)
+
+exclusion_tab_1
+
+
+```
+</details>
+
+
+### List of most common outcome respiratory index infections or near-index infections
+
+<details>
+  <summary>Most popular concepts for respiratory index infections</summary>
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=6, fig.height=14}
+
+final_cohort_demo %>% 
+  group_by(sub_cohort, resp_concept) %>% 
+  summarise(n_pats = n()) %>% 
+  filter( n_pats > 500) %>% 
+  ggplot() +
+  geom_bar(aes(x=reorder(resp_concept, n_pats), y = n_pats, fill = resp_concept), stat="identity", position="dodge") +
+  coord_flip() +
+  theme_bw() +
+  facet_wrap(~sub_cohort, scales="free", ncol=1) +
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=41, type = "continuous")) + 
+  theme(legend.position = "none")
+  
+
+
+```
+</details>
+
+
+# Patient event trajectories
+
+(Hidden for now until DQ issue is resolved to fix condition start dates)
+
+<!-- For this plot, we want to show all the events (distinct date + diagnosis concept or lab test) happening to patients of interest: -->
+
+<!-- * Pre-index events captured in the EHR -->
+
+<!-- * Index event -->
+
+<!-- * Post-index events -->
+
+<!-- * Post-acute period events -->
+
+<!-- A random sample of patients in each sub-cohort have been selected for this visualization. -->
+
+
+<!-- ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=6} -->
+
+
+<!-- rsv <- rsv_outcomes %>%  -->
+<!--   mutate(outcome = "First RSV infection") %>% -->
+<!--   group_by(person_id, rsv_evidence_date) %>% -->
+<!--   filter(row_number()==1) %>% -->
+<!--   ungroup() %>% -->
+<!--   select(person_id, outcome, outcome_date = rsv_evidence_date) -->
+
+<!-- covid <- exclusion_reasons %>%  -->
+<!--   filter(!is.na(covid_date)) %>%  -->
+<!--   mutate(outcome = "COVID infection") %>% -->
+<!--   group_by(person_id, covid_date) %>% -->
+<!--   filter(row_number()==1) %>% -->
+<!--   ungroup() %>% -->
+<!--   select(person_id, outcome, outcome_date = covid_date) -->
+
+<!-- flu <- exclusion_reasons %>%  -->
+<!--   filter(!is.na(flu_date)) %>%  -->
+<!--   mutate(outcome = "Influenza infection") %>% -->
+<!--   group_by(person_id, flu_date) %>% -->
+<!--   filter(row_number()==1) %>% -->
+<!--   ungroup() %>% -->
+<!--   select(person_id, outcome, outcome_date = flu_date) -->
+
+<!-- other_resp <- exclusion_reasons %>%  -->
+<!--   filter(!is.na(resp_date)) %>%  -->
+<!--   mutate(outcome = "Respiratory infection") %>% -->
+<!--   group_by(person_id, resp_date) %>% -->
+<!--   filter(row_number()==1) %>% -->
+<!--   ungroup() %>% -->
+<!--   select(person_id, outcome, outcome_date = resp_date) -->
+
+
+<!-- ## data frame of list of events, per person -->
+<!-- full_outcome_list <- -->
+<!--   rsv %>% collect() %>%  -->
+<!--   rbind(covid %>% collect()) %>%  -->
+<!--   rbind(flu %>% collect()) %>%  -->
+<!--   rbind(other_resp %>% collect()) %>%  -->
+<!--   left_join(exclusion_reasons %>%  -->
+<!--               select(person_id, ce_date, sub_cohort) %>% collect(), by="person_id") %>% -->
+<!--   mutate(days_from_index = as.numeric(outcome_date - ce_date)) %>% -->
+<!--   select(person_id, sub_cohort, outcome, days_from_index, ce_date) -->
+
+
+<!-- ## then left join onto the main cohort -->
+
+<!-- cohort_main_outcomes <- exclusion_reasons %>% -->
+<!--   mutate(outcome = paste0("Index ", sub_cohort, " infection")) %>% -->
+<!--   mutate(days_from_index = 0) %>% -->
+<!--   mutate(outcome_date = ce_date) %>% -->
+<!--   select(person_id, sub_cohort, outcome, days_from_index, ce_date, days_from_index) %>% -->
+<!--   collect() %>% -->
+<!--   rbind(full_outcome_list %>% -->
+<!--           collect() %>%  -->
+<!--           filter(days_from_index != 0)) -->
+
+<!-- sample_cohort <- final_cohort_demo %>% -->
+<!--   group_by(sub_cohort) %>% -->
+<!--   slice_sample(n=50) %>% -->
+<!--   ungroup() %>% -->
+<!--   collect() -->
+
+
+<!-- cohort_main_outcomes %>% -->
+<!--   inner_join(sample_cohort %>% select(person_id), by="person_id") %>% -->
+<!--   # filter(person_id==5511537) %>% -->
+<!--   mutate(event = outcome) %>% -->
+<!--   mutate(record_flag = outcome) %>% -->
+<!--   mutate(days_from_ce = days_from_index) %>% -->
+<!--   plot_rollup_summary() + -->
+<!--   facet_wrap(~sub_cohort, ncol = 3) + -->
+<!--   theme(legend.position = "top") -->
+
+
+<!-- ``` -->
+
+
+# Table 1, Cohort demographics
+
+
+
+Table 1 of available covariates (in progress, additional covariates to be added).
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+final_dataset <-
+  analytic_dataset %>% 
+  # filter(exclude_based_on_rsv_outcome==0) %>% 
+  mutate(lab_confirmed_index = ifelse(lab_confirmed==1, "lab confirmed", "dx only")) %>% 
+  mutate(lab_confirmed_rsv_outcome = ifelse(lab_confirmed_rsv==1, "lab confirmed RSV", "dx only")) %>% 
+  mutate(visit_span_criteria_rank = as.character(visit_span_criteria_rank)) %>% 
+  mutate(hospital_flag = as.character(hospital_flag)) %>% 
+  mutate(hosp_with_vent = as.character(hosp_with_vent)) %>% 
+  mutate(hospital_flag = ifelse(is.na(hospital_flag), "0", hospital_flag)) %>% 
+  mutate(hosp_with_vent = ifelse(is.na(hosp_with_vent), "0", hosp_with_vent)) 
+  
+table1(~ sex_cat + race_eth_cat + age_cat_at_ce + 
+         visit_type_inpatient +
+         visit_type_outpatient +
+         visit_type_ed + 
+         visit_type_other +
+         visit_span_criteria_rank + hospital_flag +
+         insurance_class
+         | sub_cohort*lab_confirmed_index, 
+       overall = F,
+       data = final_dataset)
+
+table1(~ sex_cat + race_eth_cat + age_cat_at_ce + 
+         visit_type_inpatient +
+         visit_type_outpatient +
+         visit_type_ed + 
+         visit_type_other +
+         visit_span_criteria_rank + hospital_flag +hosp_with_vent +complex_chronic_flag +
+         insurance_class
+         | sub_cohort, 
+       overall = F,
+       data = final_dataset)
+
+
+```
+
+
+# Outcomes (data quality / variable development)
+
+Table describing the proportions of the cohorts with RSV infection evidence, stratified by when the RSV occurred, and whether or not the index infection was lab confirmed.
+
+**Known DQ date issue affecting precise dates of index infection, which affects the fringes of outcome infection phase for RSV. Take numbers as approximate until DQ issue is resolved.**
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+post_acute_rsv <-
+  final_dataset %>% 
+  # mutate(days_from_index = as.numeric(rsv_evidence_date - ce_date)) %>% 
+  # mutate(days_from_index_to_rsv = days_from_index) %>% 
+  # mutate(rsv_in_post_acute_period = ifelse(days_from_index >= 15 & days_from_index < 182, 1, 0)) %>% 
+  # mutate(rsv_in_post_acute_period = ifelse(rsv_in_post_acute_period==1, "Yes", "No")) %>% 
+  # mutate(rsv_occurrence_period = case_when(
+  #   days_from_index >= 30 & days_from_index < 180 ~ "post acute (1-6 months after index)",
+  #   days_from_index >=-30 & days_from_index < 30 ~ "acute (within 30 days of index either direction)",
+  #   days_from_index < -30 & days_from_index > -180 ~ "pre-acute (1-6 months before index)",
+  #   days_from_index <= -180 ~ "prior (>=6 months before index infection)",
+  #   days_from_index >= 180 ~ "RSV > 180 days (future)",
+  #   TRUE ~ "No evidence of RSV"
+  # )) %>% 
+  mutate(lab_confirmed_rsv_outcome = case_when(is.na(lab_confirmed_rsv_outcome) ~ "No evidence of RSV",
+                                               TRUE ~ lab_confirmed_rsv_outcome))
+  
+table1(~ rsv_occurrence_period*lab_confirmed_rsv_outcome 
+                | sub_cohort*lab_confirmed_index, 
+       overall = F,
+       data = post_acute_rsv)
+
+## TODO add lab confirmed RSV or not 
+## Outcomes table
+
+
+## Plot of days_til
+post_acute_rsv %>% 
+  # filter(days_from_index != 0) %>% 
+  ggplot() +
+  geom_density(aes(x=days_from_index, fill=sub_cohort, color=sub_cohort), alpha=0.5) +
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  labs(x="Days from index date to RSV date", y ="Density") +
+  theme(legend.position = "top") +
+  ggtitle("Time to outcome")
+
+
+### Just covid and flu, time to RSV outcome:
+days_from_counts <- post_acute_rsv %>% 
+  filter(sub_cohort %in% c("Influenza", "COVID")) %>% 
+  group_by(days_from_index, sub_cohort) %>% 
+  summarise(npats = n_distinct(person_id)) %>% 
+  ungroup() %>% 
+  group_by(sub_cohort) %>% 
+  mutate(total_cohort = sum(npats)) %>% 
+  mutate(prop_cohort = npats/total_cohort) %>% 
+  compute_new()
+
+post_acute_rsv %>% 
+  filter(sub_cohort %in% c("Influenza", "COVID")) %>%
+  filter(!is.na(days_from_index) ) %>% 
+  ggplot() +
+  geom_histogram(aes(x=days_from_index, fill = sub_cohort),
+                 bins = 50) +
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  labs(x="Days from index date to RSV date") +
+  theme(legend.position = "top") +
+  ggtitle("Days from index to RSV outcome")
+
+post_acute_rsv %>% 
+  filter(sub_cohort %in% c("Influenza", "COVID")) %>%
+  filter(!is.na(days_from_index), rsv_occurrence_period != "acute (within 30 days of index either direction)"  ) %>% 
+  ggplot() +
+  geom_histogram(aes(x=days_from_index, fill = sub_cohort),
+                 bins = 50) +
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  labs(x="Days from index date to RSV date") +
+  theme(legend.position = "top") +
+  ggtitle("Days from index to RSV outcome")
+
+post_acute_rsv %>% 
+  filter(sub_cohort %in% c("Influenza", "COVID")) %>%
+  filter(!is.na(days_from_index)  ) %>% 
+  ggplot() +
+    geom_histogram(aes(x=days_from_index, fill = sub_cohort),
+                   bins = 60) +
+           # stat = "density",width = 1) +
+  # geom_bar(aes(x=days_from_index, fill = sub_cohort),
+  #          stat = "density",
+  #          position = "dodge", width = 1) +
+  # scale_y_continuous(limits=c(0,1)) +
+  # geom_histogram(aes(x=days_from_index, fill = sub_cohort),
+  #                bins = 50) +
+  facet_wrap(~rsv_occurrence_period, ncol=1, scales = "free_y") +
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  labs(x="Days from index date to RSV date") +
+  theme(legend.position = "top") +
+  ggtitle("Days from index to RSV outcome")
+  
+
+post_acute_rsv %>% 
+  filter(sub_cohort %in% c("Influenza", "COVID")) %>%
+  filter(!is.na(days_from_index)  ) %>% 
+  ggplot() +
+  geom_vline(xintercept = 180) +
+  geom_vline(xintercept = 30) +
+    # geom_histogram(aes(x=days_from_index, fill = sub_cohort),
+    #                bins = 60) +
+    #        # stat = "density",width = 1) +
+  geom_bar(aes(x=days_from_index, fill = sub_cohort, alpha=0.3),
+           stat = "density",
+           trim = TRUE,
+           alpha = 0.3,
+           position = "dodge", width = 1) +
+  # scale_y_continuous(limits=c(0,1)) +
+  # geom_histogram(aes(x=days_from_index, fill = sub_cohort),
+  #                bins = 50) +
+  facet_wrap(~rsv_occurrence_period, ncol=1, scales = "free_y") +
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  labs(x="Days from index date to RSV date for patients with presence of RSV") +
+  theme(legend.position = "top") +
+  ggtitle("Days from index to RSV outcome")
+
+post_acute_rsv %>% 
+  filter(sub_cohort %in% c("Influenza", "COVID")) %>%
+  filter(!is.na(days_from_index)  ) %>% 
+  mutate(new_rsv_occurrence_period = case_when(
+    rsv_occurrence_period %in% c("post acute (1-6 months after index)", "RSV > 180 days (future)") ~ "New follow up period (30-300 days)",
+    TRUE ~ rsv_occurrence_period
+  )) %>% 
+  ggplot() +
+  geom_vline(xintercept = 180) +
+  geom_vline(xintercept = 30) +
+    # geom_histogram(aes(x=days_from_index, fill = sub_cohort),
+    #                bins = 60) +
+    #        # stat = "density",width = 1) +
+  geom_bar(aes(x=days_from_index, fill = sub_cohort, alpha=0.3),
+           stat = "density",
+           trim = TRUE,
+           alpha = 0.3,
+           position = "dodge", width = 1) +
+  # scale_y_continuous(limits=c(0,1)) +
+  # geom_histogram(aes(x=days_from_index, fill = sub_cohort),
+  #                bins = 50) +
+  facet_wrap(~new_rsv_occurrence_period, ncol=1, scales = "free_y") +
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  labs(x="Days from index date to RSV date for patients with presence of RSV") +
+  theme(legend.position = "top") +
+  ggtitle("NEW follow up period, proposed. ")
+
+
+
+post_acute_rsv %>% 
+  filter(sub_cohort %in% c("Influenza", "COVID")) %>%
+  filter(!is.na(days_from_index)  ) %>% 
+  ggplot() +
+    # geom_histogram(aes(x=days_from_index, fill = sub_cohort),
+    #                bins = 60) +
+    #        # stat = "density",width = 1) +
+  geom_bar(aes(x=days_from_index, fill = rsv_occurrence_period),
+           stat = "density",
+           position = "dodge", width = 1) +
+  # scale_y_continuous(limits=c(0,1)) +
+  # geom_histogram(aes(x=days_from_index, fill = sub_cohort),
+  #                bins = 50) +
+  facet_wrap(~sub_cohort, ncol=1, scales = "free_y") +
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=6, type = "continuous")) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n=6, type = "continuous")) +
+  labs(x="Days from index date to RSV date") +
+  theme(legend.position = "top") +
+  ggtitle("Days from index to RSV outcome")
+
+```
+
+### Outcomes table removing co-infected patients from denom
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+post_acute_rsv_no_coinfections <-
+  post_acute_rsv %>% 
+  filter(rsv_occurrence_period !="acute (within 15 days of index or 30 days before)")
+  
+  
+table1(~ rsv_occurrence_period*lab_confirmed_rsv_outcome 
+                | sub_cohort*lab_confirmed_index, 
+       overall = F,
+       data = post_acute_rsv_no_coinfections)
+
+## TODO add lab confirmed RSV or not 
+## Outcomes table
+
+
+## Plot of days_til
+post_acute_rsv_no_coinfections %>% 
+  # filter(days_from_index != 0) %>% 
+  ggplot() +
+  geom_density(aes(x=days_from_index, fill=sub_cohort, color=sub_cohort), alpha=0.5) +
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  scale_color_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) +
+  labs(x="Days from index date to RSV date", y ="Density") +
+  theme(legend.position = "top") +
+  ggtitle("Time to outcome")
+
+
+```
+
+<!-- ### Prior RSV infections  -->
+
+<!-- Chart here to show what patients have had RSV before their "index" infection... -->
+
+
+<!-- ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE} -->
+
+<!-- ## Plot of days_til -->
+
+<!-- cohort_with_rsv_outcomes %>%  -->
+<!--   mutate(days_from_index = as.numeric(rsv_evidence_date - ce_date)) %>%  -->
+<!--   filter(days_from_index < 1) %>%  -->
+<!--   ggplot() + -->
+<!--   geom_density(aes(x=days_from_index, fill=sub_cohort), alpha=0.5) + -->
+<!--   theme_bw() +  -->
+<!--   scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) + -->
+<!--   labs(x="Days from index date to RSV date", y ="Density") + -->
+<!--   theme(legend.position = "top") -->
+
+
+<!-- ``` -->
+
+
+<!-- ### Within post-acute period -->
+
+<!-- ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE} -->
+
+<!-- ## Plot of days_til -->
+
+<!-- cohort_with_rsv_outcomes %>%  -->
+<!--   mutate(days_from_index = as.numeric(rsv_evidence_date - ce_date)) %>%  -->
+<!--   filter(days_from_index < 180, days_from_index > 0) %>%  -->
+<!--   ggplot() + -->
+<!--   geom_density(aes(x=days_from_index, fill=sub_cohort), alpha=0.5) + -->
+<!--   theme_bw() +  -->
+<!--   scale_fill_manual(values = wes_palette("FantasticFox1", n=3, type = "continuous")) + -->
+<!--   labs(x="Days from index date to RSV date", y ="Density") + -->
+<!--   theme(legend.position = "top") -->
+
+<!-- ``` -->
+
+
+### Crude time series breakdown of monthly index infections and RSV infections
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+index_infections_data <- post_acute_rsv %>% 
+  mutate(month_of_infection = floor_date(ce_date, unit="month")) %>% 
+  group_by(month_of_infection, sub_cohort) %>% 
+  summarise(n=n_distinct(person_id)) %>% 
+  ungroup() %>% 
+  group_by(sub_cohort) %>% 
+  mutate(totalsubcohort = sum(n)) %>% 
+  mutate(prop_cohort = n/totalsubcohort) %>% 
+  compute_new()
+
+rsv_outcomes_data <- post_acute_rsv %>% 
+  mutate(month_of_rsv = floor_date(rsv_evidence_date, unit="month"))
+
+```
+
+
+
+
+### RSV post-acute infections as a function of cohort entry week or month
+
+Investigating proportions over time of each sub-cohort for the presence of RSV
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, fig.width=10, fig.height=6}
+
+
+post_acute_rsv %>% 
+  group_by(sub_cohort, rsv_occurrence_period, cohort_entry_week) %>% 
+  summarise(n_pats = n()) %>% 
+  ungroup() %>% 
+  group_by(sub_cohort, cohort_entry_week) %>% 
+  mutate(cohort_week_total = sum(n_pats)) %>% 
+  ungroup() %>% 
+  mutate(week_cohort_proportion = as.numeric(n_pats)/as.numeric(cohort_week_total)) %>% 
+  filter(rsv_occurrence_period != "No evidence of RSV") %>% 
+  ggplot() +
+  geom_bar(aes(x=cohort_entry_week, y = week_cohort_proportion, fill = rsv_occurrence_period), stat="identity", position="stack") +
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=4, type = "continuous")) +
+  labs(x="Cohort entry week", y ="Proportion of patients") +
+  facet_wrap(~sub_cohort, ncol=1, scales = "free") +
+  theme(legend.position = "top")
+
+month_data <- post_acute_rsv %>% 
+  mutate(cohort_entry_month = floor_date(ce_date, unit = "month"))
+
+table1(~ rsv_occurrence_period | sub_cohort*cohort_entry_month,
+       data = month_data, overall=F)
+
+month_data %>% 
+  group_by(cohort_entry_month, sub_cohort, rsv_occurrence_period) %>% 
+  summarise(n=n()) %>% 
+  ungroup() %>% 
+  group_by(sub_cohort, cohort_entry_month) %>% 
+  mutate(monthly_total = sum(n)) %>% 
+  mutate(monthly_prop = as.numeric(n)/as.numeric(monthly_total)) %>% 
+  ungroup() %>% 
+  filter(rsv_occurrence_period != "No evidence of RSV") %>% 
+  ggplot() +
+  geom_bar(aes(x=cohort_entry_month, y = monthly_prop, fill = rsv_occurrence_period), stat="identity", position="stack")+
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=5, type = "continuous")) +
+  labs(x="Cohort entry month", y ="Proportion of patients with index case in month") +
+  facet_wrap(~sub_cohort, ncol=1, scales = "free") +
+  theme(legend.position = "top") +
+  coord_flip()
+
+month_data %>% 
+  group_by(cohort_entry_month, sub_cohort, rsv_occurrence_period) %>% 
+  summarise(n=n()) %>% 
+  ungroup() %>% 
+  group_by(sub_cohort, cohort_entry_month) %>% 
+  mutate(monthly_total = sum(n)) %>% 
+  mutate(monthly_prop = as.numeric(n)/as.numeric(monthly_total)) %>% 
+  ungroup() %>% 
+  filter(rsv_occurrence_period != "No evidence of RSV") %>% 
+  ggplot() +
+  geom_bar(aes(x=cohort_entry_month, y = monthly_prop, fill = sub_cohort), stat="identity", position="dodge")+
+  theme_bw() + 
+  scale_fill_manual(values = wes_palette("FantasticFox1", n=5, type = "continuous")) +
+  labs(x="Cohort entry month", y ="Proportion of patients with index case in month") +
+  facet_wrap(~rsv_occurrence_period, ncol=3, scales = "free") +
+  theme(legend.position = "top") +
+  coord_flip()
+
+
+
+
+```
+
+
+

@@ -1,0 +1,607 @@
+---
+title: "Subsequent Infections - RSV Study Modeling and Analysis"
+date: "`r format(Sys.time(), '%m-%d-%y')`"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+---
+
+Report for progress on study modeling and analysis for the comparison of the presence of post-acute RSV infection in COVID-positive patients compared to comparison groups (influenza and other acute respiratory infections).
+
+```{r include=FALSE}
+# Default taken from R notebook behavior: when knitting, wd will always be location of notebook
+base_dir <- '..'
+Sys.setenv(PEDSNET_SKIP_REQUEST_EXECUTION=1)
+try(source('../site/run.R')) # May not be able to make db connection
+try(source('site/run.R'))
+
+# Set to "local" to read data from ../results, or another value to read from db
+data_source <- if_else(config('execution_mode') == 'distribution', 'local', 'not_local')
+
+require(tibble)
+require(knitr)
+require(kableExtra)
+require(readr)
+require(table1)
+require(ggplot2)
+library(GGally)
+require(tidyverse)
+require(lubridate)
+library(wesanderson)
+library(survey)
+library(survival)
+library(WeightIt)
+library(cobalt)
+library(jtools)
+
+get_results <- function(tbl_name) {
+  if (data_source == 'local') {
+    rslt <- read_csv(paste0('../results/', tbl_name, '.csv'))
+  }
+  else {
+    rslt <- results_tbl(tbl_name) %>% collect()
+  }
+  rslt
+}
+
+
+prettify_kable <- function(data, indents = list()) {
+  
+  if (length(indents)==0) {
+      data %>% 
+        kbl(digits = 2, format.args = list(big.mark = ',')) %>%
+        kable_classic(full_width = F, html_font = "Arial") %>% 
+        kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>% 
+        column_spec(1, bold = F, border_right = T)
+  } else {
+      data %>% 
+        kbl(digits = 2, format.args = list(big.mark = ',')) %>%
+        kable_classic(full_width = F, html_font = "Arial") %>% 
+        kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>% 
+        add_indent(indents) %>% 
+        column_spec(1, bold = F, border_right = T)
+  }
+
+  # 
+  # data %>% 
+  #   kable(digits = 2, format.args = list(big.mark = ',')) %>% 
+  #   kable_styling(bootstrap_options = c("striped", "hover")) %>% 
+  #   column_spec(1, bold = T, border_right = T)
+}
+
+postacute_min_start_date = as.Date("2022-04-01")
+postacute_max_end_date = as.Date("2023-01-01")
+
+cohort_entry_start_date = as.Date("2022-03-01")
+cohort_entry_end_date = as.Date("2022-07-01")
+
+cohort_1_label = "rsv_study_cohort"
+# cohort_1_label = "sample_pats"
+
+# exclusion_reasons <- results_tbl(paste0(cohort_1_label, "_w_exclusion_reasons"))
+
+# attrition <- results_tbl(paste0(cohort_1_label, "_attrition"))
+
+# final_cohort_demo <- results_tbl(paste0(cohort_1_label, "_cohort_demo"))
+
+# rsv_outcomes <- results_tbl(paste0(cohort_1_label, "_rsv_outcomes"))
+
+# cohort_with_rsv_outcomes <-
+#   final_cohort_demo %>% 
+#   left_join(rsv_outcomes, by="person_id")
+
+# analytic_dataset <-
+#   results_tbl(paste0(cohort_1_label, "_analytic_dataset")) %>% 
+#   filter(ce_date >= cohort_entry_start_date,
+#          ce_date < cohort_entry_end_date)
+
+
+## TODO why are there multiple rows for the same person
+# TODO the RSV function is saving rows for each RSV index date. That makes sense, because need to track all infections, so might need some fancy logic for exlusions though
+# not just earliest because there could be like a prior case, and then a pot-acute case
+# final_analytic_dataset <-
+#   analytic_dataset %>% 
+#   filter(sex_cat != "Other/unknown") %>% 
+#   filter(is.na(covid_index_date_imputed) | covid_index_date_imputed==0) %>% 
+#   group_by(person_id) %>% 
+#   mutate(exclude = max(exclude_based_on_rsv_outcome)) %>% 
+#   filter(exclude < 1) %>% 
+#   slice_min(rsv_evidence_date, with_ties=FALSE) %>% 
+#   ungroup() %>% 
+#   mutate(new_rsv_outcome_fu = case_when(
+#     rsv_occurrence_period %in% c("post acute (1-6 months after index)", "Future RSV 180-300 days)") ~ 1,
+#     TRUE ~ 0
+#   )) %>% 
+#   compute_new(indexes=c("person_id"))
+
+description = "covid_flu_3"
+description = "covid_flu_noutil"
+description = "covid_flu_util"
+# description = "covid_ari_ce_week"
+
+covid_flu_iptw_results <- results_tbl( paste0(description,'_tabc')) %>%
+  mutate(hospital_flag = as.character(hospital_flag)) %>% # TODO change to just hospital visit type 
+  mutate(hosp_with_vent = as.character(hosp_with_vent)) %>% 
+  mutate(rsv_outcome = outcome_rsv_postacute_30) %>% 
+  # mutate(rsv_outcome_postacute = ifelse(rsv_occurrence_period == "post acute (15-180 days after index)", 1, 0)) %>% 
+  collect()
+
+visit_counts <- results_tbl(paste0(cohort_1_label, "_visit_lookback_counts")) %>% 
+  collect()
+
+```
+
+
+# Sections
+
+## Comparison cohort table
+
+Compare numbers of (raw numbers) patients between comparison groups.
+
+## Covariates
+
+Pair plots between potential covariates to understand relationships.
+
+Covariates associated with the treatment should be included as weighting variables.
+
+### Table 1
+
+TODO
+
+```{r}
+# Table 1 for the covid_iptw table, covid vs. flu
+```
+
+### Pairs plot
+
+``` {r, echo = FALSE, message = FALSE, warning = FALSE, fig.width = 16, fig.height = 14}
+
+pairs_data <- covid_flu_iptw_results %>% 
+  select(race_eth_cat, age_group, sub_cohort, util_outpatient, util_inpatient) 
+
+ggpairs(pairs_data) +
+  theme_bw()
+
+pairs_data <- covid_flu_iptw_results %>% 
+  mutate(hospital_flag = as.character(hospital_flag)) %>% 
+  mutate(hospital_flag = ifelse(is.na(hospital_flag), "0", hospital_flag)) %>% 
+  mutate(hosp_with_vent = as.character(hosp_with_vent)) %>% 
+  mutate(hosp_with_vent = ifelse(is.na(hosp_with_vent), "0", hosp_with_vent)) %>% 
+  select(hospital_flag, hosp_with_vent, sub_cohort, util_inpatient, util_outpatient, complex_chronic_flag) 
+
+ggpairs(pairs_data) +
+  theme_bw()
+
+```
+
+### Utilization associations
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE, fig.width =8, fig.height=4}
+
+barplot_association_exposure <- function(df, variable_column) {
+  newplot <- df %>% 
+    group_by(!!sym(variable_column), sub_cohort) %>% 
+    summarise(n=n_distinct(person_id)) %>% 
+    ungroup() %>% 
+    group_by(sub_cohort) %>% 
+    mutate(total_cohort = sum(n)) %>% 
+    mutate(prop_variable =  as.numeric(n)/as.numeric(total_cohort)) %>% 
+    ungroup() %>% 
+    ggplot() +
+    geom_bar(aes(x=!!sym(variable_column), y = prop_variable, fill=sub_cohort),stat="identity", position="dodge") +
+    theme_bw() +
+    theme(legend.position = "top") +
+    scale_fill_brewer(palette = "Dark2") 
+  
+  newplot %>% return()
+  
+}
+
+barplot_association_exposure_outcome <- function(df, variable_column) {
+  # vis_type_col = !!visit_column
+  newplot <- df %>% 
+    mutate(rsv_outcome = as.character(outcome_rsv_postacute_15)) %>% 
+    group_by(!!sym(variable_column), sub_cohort, rsv_outcome) %>% 
+    summarise(n=n_distinct(person_id)) %>% 
+    ungroup() %>% 
+    group_by(sub_cohort, !!sym(variable_column)) %>% 
+    mutate(total_cohort = sum(n)) %>% 
+    mutate(prop_outcome =  as.numeric(n)/as.numeric(total_cohort)) %>% 
+    ungroup() %>% 
+    filter(rsv_outcome == "1") %>% 
+    ggplot() +
+    geom_bar(aes(x=!!sym(variable_column), y = prop_outcome, fill=sub_cohort),stat="identity", position="dodge") +
+    theme_bw() +
+    theme(legend.position = "top") +
+    scale_fill_brewer(palette = "Dark2")
+  
+  newplot %>% return()
+  
+}
+
+barplot_association_outcome <- function(df, variable_column) {
+  # vis_type_col = !!visit_column
+  newplot <- df %>% 
+    mutate(rsv_outcome = as.character(outcome_rsv_postacute_15)) %>% 
+    group_by(!!sym(variable_column), rsv_outcome) %>% 
+    summarise(n=n_distinct(person_id)) %>% 
+    ungroup() %>% 
+    group_by(!!sym(variable_column)) %>% 
+    mutate(total_cohort = sum(n)) %>% 
+    mutate(prop_outcome =  as.numeric(n)/as.numeric(total_cohort)) %>% 
+    ungroup() %>% 
+    filter(rsv_outcome == "1") %>% 
+    ggplot() +
+    geom_bar(aes(x=!!sym(variable_column), y = prop_outcome),stat="identity", position="dodge") +
+    theme_bw() +
+    theme(legend.position = "top") +
+    scale_fill_brewer(palette = "Dark2")
+  
+  newplot %>% return()
+  
+}
+
+covid_flu_iptw_results %>% 
+  barplot_association_exposure("util_outpatient") +
+  labs(x="Outpatient visits", y = "Proportion of comparison-cohort in quantile")
+
+covid_flu_iptw_results %>% 
+  barplot_association_exposure("util_inpatient") +
+  labs(x="Inpatient visits", y = "Proportion of comparison-cohort in quantile")
+
+covid_flu_iptw_results %>% 
+  barplot_association_exposure("util_ed") +
+  labs(x="ED visits", y = "Proportion of comparison-cohort in quantile")
+
+covid_flu_iptw_results %>% 
+  barplot_association_exposure("util_other") +
+  labs(x="Other visits", y = "Proportion of comparison-cohort in quantile")
+
+visit_count_data <- covid_flu_iptw_results %>% 
+  left_join(visit_counts %>% collect(), by="person_id")
+
+# visit_count_data %>% 
+#   filter(n_visits_type < 40) %>% 
+#   ggplot() +
+#   geom_point(aes(x=n_visits_type, y = rsv_outcome, color = sub_cohort)) +
+#   facet_wrap(~visit_type_rough, scales="free") +
+#   theme(legend.position = "top")
+
+covid_flu_iptw_results %>% 
+  barplot_association_outcome("util_outpatient") +
+  labs(x="Outpatient visits", y = "Proportion of quantile with RSV outcome")
+
+covid_flu_iptw_results %>% 
+  barplot_association_outcome("util_inpatient") +
+  labs(x="Inpatient visits", y = "Proportion of quantile with RSV outcome")
+
+covid_flu_iptw_results %>% 
+  barplot_association_outcome("util_other") +
+  labs(x="Other visits", y = "Proportion of quantile with RSV outcome")
+
+covid_flu_iptw_results %>% 
+  barplot_association_outcome("util_ed") +
+  labs(x="ED visits", y = "Proportion of quantile with RSV outcome")
+
+visit_count_data %>% 
+  group_by(person_id) %>% 
+  mutate(n_visits_overall = sum(n_visits_type)) %>% 
+  ungroup() %>% 
+  group_by(sub_cohort, rsv_outcome, n_visits_overall) %>% 
+  summarise(n_pats = n_distinct(person_id)) %>% 
+  ungroup() %>% 
+  group_by(sub_cohort, n_visits_overall) %>% 
+  mutate(cohort_visit_n_total = sum(n_pats)) %>% 
+  ungroup() %>% 
+  mutate(prop_of_visit_n = n_pats/cohort_visit_n_total) %>% 
+  filter(rsv_outcome==1) %>% 
+  filter(n_visits_overall<200) %>% 
+  ggplot() +
+  geom_point(aes(x=n_visits_overall, y = prop_of_visit_n, color=sub_cohort), position="dodge", stat="identity") +
+  geom_smooth(aes(x=n_visits_overall, y = prop_of_visit_n, color=sub_cohort), span=0.7) +
+  theme_bw() +
+  theme(legend.position = "top") +
+  scale_color_brewer(palette = "Dark2") +
+  labs(x="Overall number of visits", y = "Proportion in comparison cohort")
+  
+## Hospitalization now
+
+
+```
+
+
+### Hospitalization associations
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE, fig.width =8, fig.height=4}
+
+covid_flu_iptw_results %>% 
+  barplot_association_exposure("hospital_flag") +
+  labs(x="Hospitalized near index infection event", y = "Proportion of comparison cohort")
+
+covid_flu_iptw_results %>% 
+  barplot_association_outcome("hospital_flag")+
+  labs(x="Hospitalized near index infection event", y = "Proportion with RSV outcome")
+
+covid_flu_iptw_results %>% 
+  barplot_association_exposure_outcome("hospital_flag")+
+  labs(x="Hospitalized near index infection event", y = "Proportion of comparison cohort with RSV outcome")
+
+covid_flu_iptw_results %>% 
+  barplot_association_exposure("hosp_with_vent") +
+  labs(x="Hospitalized with ventilation/severe procedure near index infection event", y = "Proportion of comparison cohort")
+
+covid_flu_iptw_results %>% 
+  barplot_association_outcome("hosp_with_vent") +
+  labs(x="Hospitalized with ventilation/severe procedure near index infection event", y = "Proportion with RSV outcome")
+
+covid_flu_iptw_results %>% 
+  barplot_association_exposure_outcome("hosp_with_vent") +
+  labs(x="Hospitalized with ventilation/severe procedure near index infection event", y = "Proportion of comparison cohort with RSV outcome")
+
+
+```
+
+## IPTW
+
+Distribution of calendar week of cohort entry, unweighted and then using the weights.
+
+``` {r, echo = FALSE, message = FALSE, warning = FALSE, fig.width =6 ,  fig.height=4}
+
+calendar_time_groups <-
+  covid_flu_iptw_results %>%
+  group_by(ce_week_factor, sub_cohort) %>% 
+  summarise(n_count = n_distinct(person_id),
+            lr_weighted_count = sum(capped_iptw),
+            gbm_weighted_count = sum(iptw_gbm)) 
+
+calendar_time_groups %>% 
+  ggplot() +
+  geom_bar(aes(x=ce_week_factor, y = n_count, fill = sub_cohort), stat="identity", position="dodge") +
+  theme_bw() +
+  scale_fill_brewer(palette = "Dark2")
+
+calendar_time_groups %>% 
+  ggplot() +
+  geom_bar(aes(x=ce_week_factor, y = lr_weighted_count, fill = sub_cohort), stat="identity", position="dodge") +
+  theme_bw() +
+  scale_fill_brewer(palette = "Dark2")
+  
+calendar_time_groups %>% 
+  ggplot() +
+  geom_bar(aes(x=ce_week_factor, y = gbm_weighted_count, fill = sub_cohort), stat="identity", position="dodge")+
+  theme_bw() +
+  scale_fill_brewer(palette = "Dark2")
+
+
+
+```
+
+
+### Pre-weight and post-weight balance
+
+### GBM vs. logistic regression
+
+![Summary of IPTW 2 ways]("results/visual_summary_sheet_iptw_covid_flu_2.png")
+![Summary of IPTW 2 ways]("../results/visual_summary_sheet_iptw_covid_flu_2.png")
+![Summary of IPTW 2 ways]("../results/visual_summary_sheet_iptw_covid_flu_2.pdf")
+![Summary of IPTW 2 ways](results/visual_summary_sheet_iptw_covid_flu_2.png)
+
+
+## Outcome model
+
+```{r echo = FALSE, output = FALSE, message = FALSE , warning = FALSE}
+
+
+
+models = list()
+
+models$model_unweighted_unadjusted <- run_logistic_regression(df = covid_flu_iptw_results,
+                                                       model_formula = "rsv_outcome ~ covid",
+                                                       weight_method = "none")
+
+models$model_unweighted_adjusted <- run_logistic_regression(df = covid_flu_iptw_results,
+                                                         model_formula = "rsv_outcome ~ covid + race_eth_cat + age_group + sex_cat + ce_week_factor",
+                                                         weight_method = "none")
+
+
+models$model_weighted_lr_unadjusted <- run_logistic_regression(df = covid_flu_iptw_results,
+                                                       model_formula = "rsv_outcome ~ covid",
+                                                       weight_method = "lr")
+
+
+models$model_weighted_gbm_unadjusted <- run_logistic_regression(df = covid_flu_iptw_results,
+                                                        model_formula = "rsv_outcome ~ covid",
+                                                        weight_method = "gbm")
+
+models$model_weighted_lr_adjusted <- run_logistic_regression(df = covid_flu_iptw_results,
+                                                         model_formula = "rsv_outcome ~ covid + race_eth_cat + age_group + sex_cat + ce_week_factor",
+                                                         weight_method = "lr")
+
+# summ(models$model_weighted_lr_adjusted)
+
+models$model_weighted_gbm_adjusted <- run_logistic_regression(df = covid_flu_iptw_results,
+                                                         model_formula = "rsv_outcome ~ covid + race_eth_cat + age_group + sex_cat + ce_week_factor",
+                                                         weight_method = "gbm")
+
+
+
+```
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE, fig.width=12, fig.height=12}
+
+plot_summs(models$model_unweighted_unadjusted,
+           models$model_unweighted_adjusted,
+           models$model_weighted_lr_unadjusted,
+           models$model_weighted_gbm_unadjusted,
+           models$model_weighted_lr_adjusted,
+           models$model_weighted_gbm_adjusted,
+           model.names = c("Unweighted, unadjusted",
+                           "Unweighted, adjusted",
+                           "Weighted (LR), unadjusted",
+                           "Weighted (GBM), unadjusted", "Weighted (LR), adjusted",
+                           "Weighted (GBM), adjusted"),
+           exp = TRUE)
+
+```
+
+
+## Outcome models without adjusting for time/week 
+
+Since the weighting balances it and it was not statistically significant above
+
+```{r echo = FALSE, output = FALSE, message = FALSE , warning = FALSE}
+
+
+
+models = list()
+
+models$model_unweighted_unadjusted <- run_logistic_regression(df = covid_flu_iptw_results,
+                                                       model_formula = "rsv_outcome ~ covid",
+                                                       weight_method = "none")
+
+
+models$model_unweighted_adjusted <- run_logistic_regression(df = covid_flu_iptw_results,
+                                                         model_formula = "rsv_outcome ~ covid + race_eth_cat + age_group + sex_cat",
+                                                         weight_method = "none")
+
+
+models$model_weighted_lr_unadjusted <- run_logistic_regression(df = covid_flu_iptw_results,
+                                                       model_formula = "rsv_outcome ~ covid",
+                                                       weight_method = "lr")
+
+
+models$model_weighted_gbm_unadjusted <- run_logistic_regression(df = covid_flu_iptw_results,
+                                                        model_formula = "rsv_outcome ~ covid",
+                                                        weight_method = "gbm")
+
+models$model_weighted_lr_adjusted <- run_logistic_regression(df = covid_flu_iptw_results,
+                                                         model_formula = "rsv_outcome ~ covid + race_eth_cat + age_group + sex_cat",
+                                                         weight_method = "lr")
+
+
+models$model_weighted_gbm_adjusted <- run_logistic_regression(df = covid_flu_iptw_results,
+                                                         model_formula = "rsv_outcome ~ covid + race_eth_cat + age_group + sex_cat",
+                                                         weight_method = "gbm")
+
+util_overall_data <- covid_flu_iptw_results %>% 
+  left_join(visit_count_data %>% 
+              group_by(person_id) %>% 
+              summarise(n_visits_overall = sum(n_visits_type)) %>% 
+              mutate(visits_high = ifelse(n_visits_overall > 30, "high_utilizer", "low_utilizer")), by="person_id")
+
+
+models$model_weighted_lr_util <- run_logistic_regression(df = covid_flu_iptw_results,
+                                                         model_formula = "rsv_outcome ~ covid + age_group + util_outpatient + util_inpatient + util_ed + util_other",
+                                                         weight_method = "lr")
+
+models$model_weighted_lr_util_overall <- run_logistic_regression(df = util_overall_data,
+                                                         model_formula = "rsv_outcome ~ covid + age_group + n_visits_overall",
+                                                         weight_method = "lr")
+
+models$model_weighted_lr_util_overall_binary <- run_logistic_regression(df = util_overall_data,
+                                                         model_formula = "rsv_outcome ~ covid + age_group + visits_high",
+                                                         weight_method = "lr")
+
+models$model_weighted_lr_util_overall_binary_only <- run_logistic_regression(df = util_overall_data,
+                                                         model_formula = "rsv_outcome ~ covid + visits_high",
+                                                         weight_method = "lr")
+
+
+
+```
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE, fig.width=12, fig.height=8}
+
+plot_summs(models$model_unweighted_unadjusted,
+           # models$model_unweighted_adjusted,
+           # models$model_weighted_lr_unadjusted,
+           # models$model_weighted_gbm_unadjusted,
+           models$model_weighted_lr_adjusted,
+           models$model_weighted_gbm_adjusted,
+           models$model_weighted_lr_util,
+           models$model_weighted_lr_util_overall,
+           # models$model_weighted_lr_util_overall_binary,
+           models$model_weighted_lr_util_overall_binary_only,
+           model.names = c("Unweighted, unadjusted",
+                           # "Unweighted, adjusted",
+                           # "Weighted (LR), unadjusted",
+                           # "Weighted (GBM), unadjusted", 
+                           "Weighted (LR), adjusted",
+                           "Weighted (GBM), adjusted",
+                           "Weighted (LR), adjusted for util",
+                           "Weighted (LR) adjusted overall util",
+                           "Weighted (LR) overall binary util"),
+           exp =TRUE)
+
+```
+
+### Modeling with no weights
+
+### LR with LR weights
+
+### LR with GBM weights
+
+### Post-acute outcome only
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+
+util_overall_data <- covid_flu_iptw_results %>% 
+  mutate(hospital_flag = ifelse(is.na(hospital_flag), "0", hospital_flag)) %>% 
+  left_join(visit_count_data %>% 
+              group_by(person_id) %>% 
+              summarise(n_visits_overall = sum(n_visits_type)) %>% 
+              mutate(visits_high = ifelse(n_visits_overall > 30, "high_utilizer", "low_utilizer")), by="person_id")
+
+
+
+models$model_weighted_lr_util_overall <- run_logistic_regression(df = util_overall_data,
+                                                         model_formula = "rsv_outcome ~ covid + age_group + n_visits_overall + hospital_flag",
+                                                         weight_method = "lr")
+
+models$model_weighted_lr_util_overall_binary <- run_logistic_regression(df = util_overall_data,
+                                                         model_formula = "rsv_outcome ~ covid + age_group + visits_high + hospital_flag",
+                                                         weight_method = "lr")
+
+models$model_weighted_lr_util_overall_binary_only <- run_logistic_regression(df = util_overall_data,
+                                                         model_formula = "rsv_outcome ~ covid + visits_high + hospital_flag",
+                                                         weight_method = "lr")
+
+models$model_weighted_lr_unadjusted <- run_logistic_regression(df = util_overall_data,
+                                                         model_formula = "rsv_outcome ~ covid + hospital_flag",
+                                                         weight_method = "lr")
+
+
+
+
+
+```
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE, fig.width=12, fig.height=8}
+
+plot_summs(models$model_weighted_lr_util_overall,
+           models$model_weighted_lr_util_overall_binary,
+           models$model_weighted_lr_util_overall_binary_only,
+           models$model_weighted_lr_unadjusted,
+           model.names = c("Weighted (LR), adjusted for util",
+                           "Weighted (LR) adjusted overall util",
+                           "Weighted (LR) overall binary util",
+                           "Weighted (LR), unadjusted"),
+           exp =TRUE) + 
+  scale_color_brewer(palette = "Dark2")
+
+```
+
+### Comparing coefficients and confidence intervals of all methods
+
+```{r}
+
+```
+
+Also compare model fit statistics
+
+
+
+

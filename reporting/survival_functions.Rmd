@@ -1,0 +1,545 @@
+---
+title: "Subsequent Infections exploratory survival analysis"
+author: "Andrea Allen"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+word_document:
+df_print: paged
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 6, fig.height =4, fig.align = "center", dev = "jpeg", dpi = 200)
+
+# R packages I'm going to be using
+require(tibble)
+require(knitr)
+require(kableExtra)
+require(tidyverse)
+require(lubridate)
+require(srcr)
+# require(PSweight)
+# require(janitor)
+# require(readxl)
+# require(scales)
+require(cobalt)
+require(WeightIt)
+require(scattermore)
+require(broom)
+require(tableone)
+
+
+source("../site/run.R")
+# config("db_src", srcr("srcr_pcornet_v51"))
+
+
+.env_setup()
+
+
+# config("db_src", srcr("srcr_pedsnet_latest"))
+# config("db_src", srcr("srcr_pedsnet_v44_updt"))
+
+
+config("db_trace", FALSE)
+
+# needed for working with table1 following.  Very useful customizations
+my.render.cont <- function(x) {
+  with(stats.apply.rounding(stats.default(x), digits = 6), c("",
+    "Mean (SD)" = sprintf("%0.1f (%0.1f)", as.numeric(MEAN), as.numeric(SD)),
+    "Median [Q1-Q3]" = sprintf("%0.1f [%0.1f - %0.1f]", as.numeric(MEDIAN), as.numeric(Q1), as.numeric(Q3))
+  ))
+}
+
+my.render.cat <- function(x) {
+  c("", sapply(stats.default(x), function(y) {
+    with(
+      y,
+      sprintf("%s (%0.1f%%)", format(FREQ, big.mark = ","), PCT)
+    )
+  }))
+}
+
+pvalue <- function(x, ...) {
+  # Construct vectors of data y, and groups (strata) g
+  # from https://cran.r-project.org/web/packages/table1/vignettes/table1-examples.html#example-a-column-of-p-values
+
+  y <- unlist(x)
+  g <- factor(rep(1:length(x), times = sapply(x, length)))
+  if (is.numeric(y)) {
+    # For numeric variables, perform a standard 2-sample t-test
+    p <- t.test(y ~ g)$p.value
+  } else {
+    # For categorical variables, perform a chi-squared test of independence
+    p <- chisq.test(table(y, g))$p.value
+  }
+  # Format the p-value, using an HTML entity for the less-than sign.
+  # The initial empty string places the output on the line below the variable label.
+  c("", sub("<", "&lt;", format.pval(p, digits = 3, eps = 0.001)))
+}
+
+# fron https://rdrr.io/github/junkka/ehahelper/src/R/broom_coxme.R
+tidy.coxme <- function(x, exponentiate = FALSE, conf.int = 0.95, ...) {
+  beta <- x$coefficients
+  nvar <- length(beta)
+  nfrail <- nrow(x$var) - nvar
+  nn <- c("estimate", "exp()", "std.error", "statistic", "p.value")
+  se <- sqrt(diag(as.matrix(x$var))[nfrail + 1:nvar])
+  z <- qnorm((1 + conf.int) / 2, 0, 1)
+  ret <- data.frame(
+    "term" = names(beta),
+    "estimate" = beta,
+    "std.error" = se,
+    "statistic" = beta / se,
+    "p.value" = 1 - pchisq((beta / se)^2, 1),
+    "conf.low" = beta - z * se,
+    "conf.high" = beta + z * se,
+    "beta" = beta
+  )
+  if (exponentiate) {
+    ret$estimate <- exp(ret$estimate)
+    ret$conf.low <- exp(ret$conf.low)
+    ret$conf.high <- exp(ret$conf.high)
+  }
+  rownames(ret) <- c(1:nrow(ret))
+  ret
+}
+```
+
+
+
+# Tables
+
+# Table 2. Cross-tab of exposure and outcome counts     
+
+
+```{r Table2, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, results='asis', knitr.kable.NA = '', fig.width=6, fig.height=4}
+### Recode sex variable as binary for matching (if necessary)
+
+description = "covid_flu_3"
+
+## TODO THIS NEEDS TO BE FIXED IN THE OUTPUT OF THE RSV_OUTCOME VARIABLE
+covid_flu_iptw_results <- results_tbl( paste0(description,'_tabc')) %>%
+  collect()
+
+cohort_fu <-
+  covid_flu_iptw_results %>%
+  rowwise() %>%
+  mutate(fu_date = case_when(
+    is.na(rsv_evidence_date) ~ as.Date(ce_date + days(300)),
+    TRUE ~ rsv_evidence_date
+  )) %>% 
+  mutate(
+    index_date = as.Date(ce_date, "%Y-%m-%d"),
+    fu_time_mo = trunc(as.numeric(as.Date(fu_date, "%Y-%m-%d") - index_date) / 30),
+    fu_time_day = as.numeric(as.Date(fu_date, "%Y-%m-%d") - index_date), # follow-up time in days
+    exposure_status = as.factor(covid)
+  )
+
+
+### Implement secondary exclusion criteria
+fu_patients <- cohort_fu %>%
+  filter(fu_time_day > 0)# need to chnge this, should change to follow up being 180 days if no cases (or 300)
+
+fu_patients$female <- case_when(
+  fu_patients$sex_cat == "Female" ~ 1,
+  TRUE ~ 0
+)
+# 
+# acs_zipcode <- read_csv(file = "../specs/ACS2020_5yr_zip.csv")
+# 
+# urban_rural <- read_excel("../specs/ruralurbancodes2013.xls") %>%
+#   mutate(county = as.numeric(FIPS))
+# 
+# zip_county <- read_excel("../specs/COUNTY_ZIP_032023.xlsx") %>%
+#   rename_with(str_to_lower) %>%
+#   group_by(zip) %>%
+#   arrange(desc(res_ratio)) %>%
+#   filter(row_number() == 1) %>%
+#   ungroup() %>%
+#   mutate(state_code = substr(county, 1, 2), county_code = substr(county, 3, 10)) %>%
+#   rename(county_fips = county) %>%
+#   inner_join(tidycensus::fips_codes) %>%
+#   mutate(county_name = sprintf("%s, %s", county, state)) %>%
+#   distinct()
+# 
+# 
+# pedsnet <- pedsnet %>%
+#   left_join(acs_zipcode, by = c("zip5" = "ZIP_CODE")) %>%
+#   left_join(zip_county, by = c("zip5" = "zip")) %>%
+#   left_join(urban_rural, by = c("county_fips" = "FIPS"))
+# 
+# 
+# ### Create binary variable for metro/non-metro areas
+# # table(pedsnet$RUCC_2013)
+# rucc_vec1 <- c(1, 2, 3)
+# rucc_vec2 <- c(4, 5, 6, 7, 8, 9)
+# pedsnet$metro <- case_when(
+#   pedsnet$RUCC_2013 %in% rucc_vec1 ~ 1,
+#   pedsnet$RUCC_2013 %in% rucc_vec2 ~ 0
+# )
+# # table(pedsnet$metro)
+# # summary(pedsnet$metro)
+# 
+# 
+# ### Format index month as consecutive integer
+fu_patients_detailed <- separate(fu_patients, 
+                                 index_date, 
+                                 c("index_year", "index_month.v2", "index_day"), sep = "-")
+# 
+fu_patients_detailed$index_month.v2 <- as.numeric(fu_patients_detailed$index_month.v2) ##
+# # table(pedsnet_index$index_year)
+fu_patients_detailed$index_month.seq <- ifelse(fu_patients_detailed$index_year == 2020, 
+                                        fu_patients_detailed$index_month.v2, 
+                                        fu_patients_detailed$index_month.v2 + 12)
+# # summary(pedsnet_index$index_month.seq)
+# 
+# 
+# ### Subset data to complete observations
+fu_patients_detailed$age_baseline <- fu_patients_detailed$age_years_on_ce_date
+
+
+fu_patients_subcols <- fu_patients_detailed[, c("exposure_status", "age_baseline", "age_group", "female", "race_eth_cat",
+                                           "index_month.seq")]
+fu_complete <- fu_patients_detailed[complete.cases(fu_patients_subcols), ]
+fu_complete <- fu_complete %>% as.data.frame()
+
+table(fu_complete$exposure_status, fu_complete$rsv_outcome) %>%
+  kable() %>%
+  kable_styling()
+
+```
+
+
+
+# TIME TO EVENT ANALYSES
+
+```{r time_to_event, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE, results='asis', fig.width = 6, fig.height = 4, knitr.kable.NA = ''}
+library("survival")
+library("survminer")
+library("coxme")
+library(broom)
+# #library("cmrutils")
+# #library("boot") # Modification
+# 
+
+fit_scurve_u <- survfit(Surv(fu_time_mo, rsv_outcome) ~ exposure_status, data = fu_complete)
+cat("\n\n# Table 6. Unweighted survival curve summary information, by exposure status \n\n")
+broom::tidy(fit_scurve_u) %>%
+  dplyr::select(strata, everything()) %>%
+  mutate(n.event = case_when(n.event < 5 ~ "<5", TRUE ~ as.character(n.event))) %>%
+  mutate(n.censor = case_when(n.censor < 5 ~ "<5", TRUE ~ as.character(n.censor))) %>%
+  mutate(n.risk = case_when(n.risk < 5 ~ "<5", TRUE ~ as.character(n.risk))) %>%
+  kable() %>%
+  kable_styling() %>%
+  collapse_rows(1)
+
+
+# Fit weighted survival curve
+fit_scurve_w <- survfit(Surv(fu_time_mo, rsv_outcome) ~ exposure_status, weights = capped_iptw , data = fu_complete)
+
+fit_scurve_finegrain <- survfit(Surv(fu_time_day, rsv_outcome) ~ exposure_status, weights = capped_iptw , data = fu_complete)
+
+
+cat("\n\n# Table 7. Weighted survival curve summary information, by exposure status\n\n")
+broom::tidy(fit_scurve_w) %>%
+  dplyr::select(strata, everything()) %>%
+  mutate(n.event = case_when(n.event < 5 ~ "<5", TRUE ~ as.character(n.event))) %>%
+  mutate(n.censor = case_when(n.censor < 5 ~ "<5", TRUE ~ as.character(n.censor))) %>%
+  mutate(n.risk = case_when(n.risk < 5 ~ "<5", TRUE ~ as.character(n.risk))) %>%
+  kable() %>%
+  kable_styling() %>%
+  collapse_rows(1)
+
+# Plot unweighted survival curve (Figure 7)
+cat("\n\n# Figure 7. Unweighted survival curve\n\n")
+plot(fit_scurve_u, col = 1:2, ylim = c(0.95, 1.0), xlab = "Month", ylab = "Pr(no RSV), unweighted")
+legend(1, 0.96, c("No SARS-CoV-2", "SARS-CoV-2"), col = 1:2, lwd = 1, bty = "n")
+
+# Plot weighted survival curve (Figure 8)
+cat("\n\n# Figure 8. Weighted survival curve\n\n")
+plot(fit_scurve_w, col = 1:2, ylim = c(0.95, 1.0), xlab = "Month", ylab = "Pr(no RSV), weighted")
+legend(1, 0.96, c("No SARS-CoV-2", "SARS-CoV-2"), col = 1:2, lwd = 1, bty = "n")
+
+surv_plot <- ggsurvplot(fit_scurve_w, xlab = "Time (months)", conf.int = TRUE,
+           pval = TRUE) # Figure 9
+
+
+surv_plot$plot <- surv_plot$plot + ylim(c(0.95, 1)) 
+
+surv_plot_finegrain <- ggsurvplot(fit_scurve_finegrain, xlab = "Time (days)", conf.int = TRUE,
+           pval = TRUE) # Figure 9
+
+
+surv_plot_finegrain$plot <- surv_plot_finegrain$plot + ylim(c(0.95, 1)) 
+
+surv_plot_finegrain
+
+# Examine log-log plot for proportional hazards (weighted data)
+cat("\n\n# Figure 9. Log-log plot\n\n")
+fit_scurve_day <- survfit(Surv(fu_time_day, rsv_outcome) ~ exposure_status, weights = capped_iptw, data = fu_complete)
+ggsurvplot(fit_scurve_day, fun = "cloglog", xlab = "Time (days)") # Figure 9
+
+
+
+
+
+```
+
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.width=6, fig.height=4}
+
+# Cox modeling (Table 8)
+cat("\n\n# Table 8. Cox proportional hazards model output\n\n") # Fit unweighted Cox model (Model 1)
+
+cfit_u <- coxph(Surv(fu_time_mo, rsv_outcome) ~ exposure_status, data = fu_complete)
+# Fit weighted Cox model (Model 2)
+cfit_w <- coxph(Surv(fu_time_mo, rsv_outcome) ~ exposure_status, weights = capped_iptw, data = fu_complete)
+
+## Fine grained
+library(forcats)
+
+fu_complete$sub_cohort <- fu_complete$sub_cohort %>% as.factor() %>% forcats::fct_rev()
+
+cfit_u_finegrain <- coxph(Surv(fu_time_day, rsv_outcome) ~ sub_cohort, data = fu_complete)
+# Fit weighted Cox model (Model 2)
+cfit_w_finegrain <- coxph(Surv(fu_time_day, rsv_outcome) ~ sub_cohort, weights = capped_iptw, data = fu_complete)
+
+
+summary(cfit_u_finegrain)
+summary(cfit_w_finegrain)
+
+cfit_w_finegrain_adjusted <- coxph(Surv(fu_time_day, rsv_outcome) ~ sub_cohort + age_group, weights = capped_iptw, data = fu_complete)
+
+summary(cfit_w_finegrain_adjusted)
+
+
+
+
+
+# Fit weighted Cox model with covariates (Model 4)
+cfit_wdr <- coxph(Surv(fu_time_mo, rsv_outcome) ~ exposure_status + age_baseline + age_group + female + as.factor(race_eth_cat) + index_month.seq, weights = capped_iptw, data = fu_complete)
+
+
+# Fit weighted Cox model with random effect and covariates (Model 5)
+# cfit_wmedr <- coxme(Surv(fu_time_mo, rsv_outcome) ~ exposure_status + age_baseline + age_group + female + as.factor(race_eth_cat) + index_month.seq, weights = capped_iptw, data = fu_complete)
+
+row1 <-
+  broom::tidy(cfit_u, conf.int = TRUE)
+
+row2 <-
+  broom::tidy(cfit_w, conf.int = TRUE)
+
+z=-qnorm(0.025)
+
+row4 <-
+  broom::tidy(cfit_wdr, conf.int = TRUE) %>%
+  filter(str_detect(term, "exposure_status"))
+
+# row5 <-
+#   broom::tidy(cfit_wmedr, conf.int = TRUE) %>%
+#   filter(str_detect(term, "exposure_status")) %>%
+#   mutate(conf.low = beta - z * std.error, conf.high = beta + z * std.error)
+
+tab8 <- bind_rows(row1, row2, row4) %>%  #row5) %>%
+  mutate(model_number = row_number()) %>%
+  mutate(exp_coef = exp(estimate), conf.low = exp(conf.low), conf.high = exp(conf.high))
+
+tab8$description <- c("Unweighted", "Weighted", "Weighted, DR") #"Weighted, ME + DR")
+
+tab8 %>%
+  dplyr::select(model_number, description, coef = estimate, exp_coef, se_coef = std.error, robust.se, conf.low, conf.high) %>%
+  kable() %>%
+  kable_styling()
+
+
+cat("\n\n# Table 9. Schoenfeld residual test statistics for weighted models\n\n")
+
+# Diagnostics for weighted models
+# Diagnostics for weighted models
+# Schoenfeld residuals (Table 9)
+test.ph_m1 <- cox.zph(cfit_w) # Schoenfeld residuals for Model 2
+# test.ph_m2 <- cox.zph(cfit_me) # Model 3
+test.ph_wdr <- cox.zph(cfit_wdr) # Model 4
+# test.ph_wmedr <- cox.zph(cfit_wmedr) # Model 5
+
+bind_rows(
+  test.ph_m1$table[, 3],
+  # test.ph_m2$table[, 3],
+  test.ph_wdr$table[c("exposure_status", "GLOBAL"), 3],
+  # test.ph_wmedr$table[c("exposure_status", "GLOBAL"), 3]
+) %>%
+  mutate(model_number = row_number() + 1) %>%
+  dplyr::select(model_number, everything()) %>%
+  kable() %>%
+  kable_styling()
+
+cat("\n\n# Figure 10. Schoenfeld residual plot for Model 2\n\n")
+
+ggcoxzph(test.ph_m1) # Plot of Schoenfeld residuals (Figure 10)
+
+cat("\n\n# Table 10. Schoenfeld residual information for weighted, doubly robust model with random effects\n\n")
+# 
+# test.ph_wmedr$table %>%
+#   kable() %>%
+#   kable_styling() # Table 10
+
+cat("\n\n# Figure 11. Schoenfeld residual plots for weighted, doubly robust model\n\n")
+# ggcoxzph(test.ph_wmedr, font.main = 9, font.y = 9, font.x = 9) # Figure 11
+
+cat("\n\n# Figure 12. Martingale residual plot (Total Visits)\n\n")
+
+# Plots of Martingale residuals for Model 4
+# Please provide Martingale residual plots for Model 4 (Figure 6)
+fu_complete$resid_mart <- residuals(cfit_wdr, type = "martingale")
+
+cat("\n\n")
+
+ggplot(data = fu_complete, mapping = aes(x = exposure_status, y = resid_mart)) +
+  geom_scattermore(pointsize = 3) +
+  geom_smooth() +
+  labs(title = "Exposure") +
+  theme_bw() +
+  theme(legend.key = element_blank())
+
+cat("\n\n")
+
+
+ggplot(data = fu_complete, mapping = aes(x = age_baseline, y = resid_mart)) +
+  geom_scattermore(pointsize = 3) +
+  geom_smooth() +
+  labs(title = "Age (cont)") +
+  theme_bw() +
+  theme(legend.key = element_blank())
+
+cat("\n\n")
+
+
+ggplot(data = fu_complete, mapping = aes(x = age_group, y = resid_mart)) +
+  geom_scattermore(pointsize = 3) +
+  # geom_smooth() +
+  labs(title = "Age group") +
+  theme_bw() +
+  theme(legend.key = element_blank())
+
+cat("\n\n")
+
+
+ggplot(data = fu_complete, mapping = aes(x = female, y = resid_mart)) +
+  geom_scattermore(pointsize = 3) +
+  # geom_smooth() +
+  labs(title = "Female") +
+  theme_bw() +
+  theme(legend.key = element_blank())
+
+ggplot(data = fu_complete, mapping = aes(x = as.factor(race_eth_cat), y = resid_mart)) +
+  geom_scattermore(pointsize = 3) +
+  geom_smooth() +
+  labs(title = "Race/ethnicity") +
+  theme_bw() +
+  theme(legend.key = element_blank())
+
+
+cat("\n\n")
+
+# ggplot(data = pedsnet_complete, mapping = aes(x = total_visits, y = resid_mart)) +
+#   geom_scattermore(pointsize = 3) +
+#   geom_smooth() +
+#   labs(title = "Total Visits") +
+#   theme_bw() +
+#   theme(legend.key = element_blank())
+# 
+# cat("\n\n")
+# 
+# ggplot(data = pedsnet_complete, mapping = aes(x = pmca_baseline, y = resid_mart)) +
+#   geom_scattermore(pointsize = 3) +
+#   geom_smooth() +
+#   labs(title = "PMCA") +
+#   theme_bw() +
+#   theme(legend.key = element_blank())
+# 
+# cat("\n\n")
+
+ggplot(data = fu_complete, mapping = aes(x = index_month.seq, y = resid_mart)) +
+  geom_scattermore(pointsize = 3) +
+  geom_smooth() +
+  labs(title = "Index month") +
+  theme_bw() +
+  theme(legend.key = element_blank())
+
+# ggplot(data = pedsnet_complete, mapping = aes(x = poverty, y = resid_mart)) +
+#   geom_scattermore(pointsize = 3) +
+#   geom_smooth() +
+#   labs(title = "Poverty") +
+#   theme_bw() +
+#   theme(legend.key = element_blank())
+# 
+# cat("\n\n")
+# 
+# 
+# ggplot(data = pedsnet_complete, mapping = aes(x = less_hs, y = resid_mart)) +
+#   geom_scattermore(pointsize = 3) +
+#   geom_smooth() +
+#   labs(title = "Less HS") +
+#   theme_bw() +
+#   theme(legend.key = element_blank())
+# cat("\n\n")
+# 
+# 
+# ggplot(data = pedsnet_complete, mapping = aes(x = metro, y = resid_mart)) +
+#   geom_scattermore(pointsize = 3) +
+#   #  geom_smooth() +
+#   labs(title = "Metro") +
+#   theme_bw() +
+#   theme(legend.key = element_blank())
+
+cat("\n\n# Table 11. Cox proportional hazards bootstrapping output\n\n")
+
+# read.csv("../specs/boot_stats.csv") %>%
+#    kable(col.names= c("Model Number", "Description", "Mean Coefficient", "Mean Variance", "Variance of Coefficient", "Variance of Variance"))%>%
+#   kable_styling()
+
+
+
+cat("\n\n# Table 12. Demographic breakdown of complete sample\n\n")
+
+T12 <-
+  CreateTableOne(
+    vars = c("age_baseline", "age_group", "female", "race_eth_cat"), 
+             #"total_visits", "pmca_baseline", "poverty", "less_hs", "metro"),
+    factorVars = c("age_group", "female", "race_eth_cat"), #"metro"),
+    data = fu_complete
+  )
+
+
+print(T12, printToggle = FALSE) %>%
+  kable() %>%
+  kable_styling()
+
+cat("\n\n# Table 13. Demographic breakdown of complete sample stratified by exposure status\n\n")
+
+T13 <-
+  CreateTableOne(
+    vars = c("age_baseline", "age_group", "female", "race_eth_cat"), 
+             #"total_visits", "pmca_baseline", "poverty", "less_hs", "metro"),
+    factorVars = c("age_group", "female", "race_eth_cat"), #"metro"),
+    strata = "exposure_status",
+    data = fu_complete
+  )
+
+
+print(T13, printToggle = FALSE) %>%
+  kable() %>%
+  kable_styling()
+
+
+```
+
+
+
+
